@@ -82,7 +82,7 @@ async def run_pipeline(
             if urls:
                 for url in urls:
                     log.info(f"Fetching: {url}")
-                    fetch_result = await fetch_content(url)
+                    fetch_result = await fetch_content(url, message_text=msg.text)
 
                     if not fetch_result.success:
                         # Per spec: fetch failure -> create note with raw URL
