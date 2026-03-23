@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.hi-sweetheart</string>
+    <key>ProgramArguments</key>
+    <array>
+        <!-- UPDATE: path to your venv Python -->
+        <string>/path/to/hi-sweetheart/.venv/bin/python</string>
+        <string>-m</string>
+        <string>hi_sweetheart.main</string>
+        <string>run</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <!-- UPDATE: path to hi-sweetheart project -->
+    <string>/path/to/hi-sweetheart</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>ANTHROPIC_API_KEY</key>
+        <!-- UPDATE: your API key -->
+        <string>sk-ant-...</string>
+    </dict>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Hour</key>
+            <integer>9</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>19</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>23</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+    </array>
+    <key>StandardOutPath</key>
+    <string>/tmp/hi-sweetheart-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/hi-sweetheart-stderr.log</string>
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

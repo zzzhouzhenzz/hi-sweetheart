@@ -1,0 +1,11 @@
+{
+  "sender": "+15551234567",
+  "api_key_env": "ANTHROPIC_API_KEY",
+  "mode": "auto",
+  "reading_list_path": "~/Downloads/hi-sweetheart-reading-list.md",
+  "notes_path": "~/.hi-sweetheart/notes.md",
+  "claude_settings_path": "~/.claude/settings.json",
+  "claude_plugins_path": "~/.claude/plugins",
+  "log_path": "~/.hi-sweetheart/runs.log",
+  "pending_actions_path": "~/.hi-sweetheart/pending.json"
+}
