@@ -81,6 +81,22 @@ async def run_pipeline(
 
             if urls:
                 for url in urls:
+                    # Podcast URLs: skip fetch/classify, open directly in Apple Podcasts
+                    if "podcasts.apple.com" in url:
+                        log.info(f"Podcast URL detected: {url}")
+                        podcast = Classification(
+                            type="podcast", confidence=1.0,
+                            summary=f"Apple Podcast: {url}",
+                            action_detail={"podcast_url": url, "podcast_name": "(from iMessage)"},
+                        )
+                        if not dry_run:
+                            result = execute_action(podcast, config)
+                        else:
+                            result = f"[DRY RUN] Would execute: podcast — open in Apple Podcasts: {url}"
+                            log.info(result)
+                        summary.add("podcast", result)
+                        continue
+
                     log.info(f"Fetching: {url}")
                     fetch_result = await fetch_content(url, message_text=msg.text)
 
