@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 VALID_MODES = ("auto", "tiered", "propose")
-REQUIRED_FIELDS = ("sender", "api_key_env", "mode", "reading_list_path",
+REQUIRED_FIELDS = ("sender", "mode", "reading_list_path",
                    "notes_path", "claude_settings_path", "claude_plugins_path",
                    "log_path", "pending_actions_path")
 
@@ -17,7 +17,6 @@ class ConfigError(Exception):
 @dataclass
 class Config:
     sender: str
-    api_key_env: str
     mode: str
     reading_list_path: Path
     notes_path: Path
@@ -48,7 +47,6 @@ def load_config(path: Path) -> Config:
 
     return Config(
         sender=data["sender"],
-        api_key_env=data["api_key_env"],
         mode=data["mode"],
         **{f: Path(data[f]).expanduser() for f in path_fields},
     )

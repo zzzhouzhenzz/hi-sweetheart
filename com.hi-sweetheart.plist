@@ -17,9 +17,9 @@
     <string>/path/to/hi-sweetheart</string>
     <key>EnvironmentVariables</key>
     <dict>
-        <key>ANTHROPIC_API_KEY</key>
-        <!-- UPDATE: your API key -->
-        <string>sk-ant-...</string>
+        <!-- UPDATE: ensure claude CLI is on PATH -->
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
     </dict>
     <key>StartCalendarInterval</key>
     <array>

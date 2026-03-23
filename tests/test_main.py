@@ -12,7 +12,6 @@ def _setup_environment(tmp_path) -> dict:
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps({
         "sender": "+15551234567",
-        "api_key_env": "TEST_API_KEY",
         "mode": "auto",
         "reading_list_path": str(tmp_path / "reading-list.md"),
         "notes_path": str(tmp_path / "notes.md"),
@@ -62,8 +61,7 @@ async def test_run_pipeline_processes_messages(tmp_path):
 
     with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
          patch("hi_sweetheart.main.classify", mock_classify), \
-         patch("hi_sweetheart.main.send_notification"), \
-         patch.dict("os.environ", {"TEST_API_KEY": "sk-test"}):
+         patch("hi_sweetheart.main.send_notification"):
 
         await run_pipeline(
             config_path=env["config_path"],
@@ -106,8 +104,7 @@ async def test_run_pipeline_api_error_aborts_without_advancing(tmp_path):
 
     with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
          patch("hi_sweetheart.main.classify", AsyncMock(side_effect=ClassifyAPIError("API down"))), \
-         patch("hi_sweetheart.main.send_notification"), \
-         patch.dict("os.environ", {"TEST_API_KEY": "sk-test"}):
+         patch("hi_sweetheart.main.send_notification"):
 
         await run_pipeline(
             config_path=env["config_path"],
@@ -116,10 +113,8 @@ async def test_run_pipeline_api_error_aborts_without_advancing(tmp_path):
         )
 
     # ROWID should NOT have advanced
-    if env["state_path"].exists():
-        state = json.loads(env["state_path"].read_text())
-        assert state["last_message_rowid"] == 0
-    # else: state file not created = ROWID at 0, correct
+    state = json.loads(env["state_path"].read_text())
+    assert state["last_message_rowid"] == 0
 
 
 @pytest.mark.asyncio
@@ -132,8 +127,7 @@ async def test_run_pipeline_fetch_failure_creates_note(tmp_path):
     ))
 
     with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
-         patch("hi_sweetheart.main.send_notification"), \
-         patch.dict("os.environ", {"TEST_API_KEY": "sk-test"}):
+         patch("hi_sweetheart.main.send_notification"):
 
         await run_pipeline(
             config_path=env["config_path"],
@@ -141,11 +135,9 @@ async def test_run_pipeline_fetch_failure_creates_note(tmp_path):
             db_path=env["db_path"],
         )
 
-    # Notes file should have the failed URL
     notes = (tmp_path / "notes.md").read_text()
     assert "example.com" in notes
 
-    # ROWID should have advanced (fetch failure is handled gracefully)
     state = json.loads(env["state_path"].read_text())
     assert state["last_message_rowid"] == 1
 
@@ -162,7 +154,7 @@ async def test_full_pipeline_tiered_mode(tmp_path):
 
     call_count = 0
 
-    async def mock_classify(message_text, fetched_content, url, api_key):
+    async def mock_classify(message_text, fetched_content, url):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -185,8 +177,7 @@ async def test_full_pipeline_tiered_mode(tmp_path):
 
     with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
          patch("hi_sweetheart.main.classify", mock_classify), \
-         patch("hi_sweetheart.main.send_notification"), \
-         patch.dict("os.environ", {"TEST_API_KEY": "sk-test"}):
+         patch("hi_sweetheart.main.send_notification"):
 
         await run_pipeline(
             config_path=env["config_path"],

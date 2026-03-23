@@ -22,7 +22,6 @@ from hi_sweetheart.config import Config
 def _make_config(tmp_path) -> Config:
     return Config(
         sender="+15551234567",
-        api_key_env="ANTHROPIC_API_KEY",
         mode="auto",
         reading_list_path=tmp_path / "reading-list.md",
         notes_path=tmp_path / "notes.md",

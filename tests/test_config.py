@@ -8,7 +8,6 @@ def test_load_config_from_file(tmp_path):
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text(json.dumps({
         "sender": "+15551234567",
-        "api_key_env": "ANTHROPIC_API_KEY",
         "mode": "auto",
         "reading_list_path": "~/Downloads/reading-list.md",
         "notes_path": "~/.hi-sweetheart/notes.md",
@@ -33,7 +32,6 @@ def test_load_config_invalid_mode(tmp_path):
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text(json.dumps({
         "sender": "+15551234567",
-        "api_key_env": "ANTHROPIC_API_KEY",
         "mode": "yolo",
         "reading_list_path": "~/r.md",
         "notes_path": "~/n.md",

@@ -1,7 +1,7 @@
 import json
+import subprocess
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-import anthropic
+from unittest.mock import patch, MagicMock
 from hi_sweetheart.classifier import classify, Classification, ClassifyAPIError, CLASSIFICATION_TYPES
 
 
@@ -17,8 +17,9 @@ def test_classification_types():
 
 @pytest.mark.asyncio
 async def test_classify_returns_structured_result():
-    mock_response = MagicMock()
-    mock_response.content = [MagicMock(text=json.dumps({
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = json.dumps({
         "type": "bookmark",
         "confidence": 0.9,
         "summary": "Article about prompt engineering",
@@ -26,18 +27,13 @@ async def test_classify_returns_structured_result():
             "title": "Prompt Engineering Guide",
             "summary": "Comprehensive guide to prompting",
         },
-    }))]
+    })
 
-    with patch("hi_sweetheart.classifier.anthropic.AsyncAnthropic") as mock_cls:
-        mock_client = AsyncMock()
-        mock_client.messages.create = AsyncMock(return_value=mock_response)
-        mock_cls.return_value = mock_client
-
+    with patch("hi_sweetheart.classifier.subprocess.run", return_value=mock_result):
         result = await classify(
             message_text="check this out",
             fetched_content="A comprehensive guide to prompt engineering...",
             url="https://example.com/prompting",
-            api_key="test-key",
         )
         assert isinstance(result, Classification)
         assert result.type == "bookmark"
@@ -46,68 +42,62 @@ async def test_classify_returns_structured_result():
 
 @pytest.mark.asyncio
 async def test_classify_low_confidence_becomes_note():
-    mock_response = MagicMock()
-    mock_response.content = [MagicMock(text=json.dumps({
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = json.dumps({
         "type": "plugin_install",
         "confidence": 0.3,
         "summary": "Maybe a plugin?",
         "action_detail": {},
-    }))]
+    })
 
-    with patch("hi_sweetheart.classifier.anthropic.AsyncAnthropic") as mock_cls:
-        mock_client = AsyncMock()
-        mock_client.messages.create = AsyncMock(return_value=mock_response)
-        mock_cls.return_value = mock_client
-
+    with patch("hi_sweetheart.classifier.subprocess.run", return_value=mock_result):
         result = await classify(
             message_text="hmm",
             fetched_content="unclear content",
             url="https://example.com",
-            api_key="test-key",
         )
         assert result.type == "note"
 
 
 @pytest.mark.asyncio
 async def test_classify_invalid_json_returns_note():
-    mock_response = MagicMock()
-    mock_response.content = [MagicMock(text="not valid json {{{")]
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = "not valid json {{{"
 
-    with patch("hi_sweetheart.classifier.anthropic.AsyncAnthropic") as mock_cls:
-        mock_client = AsyncMock()
-        mock_client.messages.create = AsyncMock(return_value=mock_response)
-        mock_cls.return_value = mock_client
-
+    with patch("hi_sweetheart.classifier.subprocess.run", return_value=mock_result):
         result = await classify(
             message_text="test",
             fetched_content="test content",
             url="https://example.com",
-            api_key="test-key",
         )
         assert result.type == "note"
 
 
 @pytest.mark.asyncio
-async def test_classify_api_error_retries_and_raises():
-    with patch("hi_sweetheart.classifier.anthropic.AsyncAnthropic") as mock_cls:
-        mock_client = AsyncMock()
-        mock_client.messages.create = AsyncMock(
-            side_effect=anthropic.APIStatusError(
-                message="Server error",
-                response=MagicMock(status_code=500),
-                body=None,
-            )
-        )
-        mock_cls.return_value = mock_client
+async def test_classify_claude_error_retries_and_raises():
+    mock_result = MagicMock()
+    mock_result.returncode = 1
+    mock_result.stderr = "Server error"
 
-        with patch("hi_sweetheart.classifier.time.sleep"):  # skip actual delay
-            with pytest.raises(ClassifyAPIError, match="API failed after 3 retries"):
+    with patch("hi_sweetheart.classifier.subprocess.run", return_value=mock_result):
+        with patch("hi_sweetheart.classifier.time.sleep"):
+            with pytest.raises(ClassifyAPIError, match="claude -p failed after 3 retries"):
                 await classify(
                     message_text="test",
                     fetched_content="test",
                     url="https://example.com",
-                    api_key="test-key",
                 )
 
-        # Should have tried 3 times
-        assert mock_client.messages.create.call_count == 3
+
+@pytest.mark.asyncio
+async def test_classify_timeout_retries():
+    with patch("hi_sweetheart.classifier.subprocess.run", side_effect=subprocess.TimeoutExpired("claude", 60)):
+        with patch("hi_sweetheart.classifier.time.sleep"):
+            with pytest.raises(ClassifyAPIError, match="claude -p failed after 3 retries"):
+                await classify(
+                    message_text="test",
+                    fetched_content="test",
+                    url="https://example.com",
+                )

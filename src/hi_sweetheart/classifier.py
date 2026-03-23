@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 import time
 from dataclasses import dataclass, field
-
-import anthropic
 
 logger = logging.getLogger("hi-sweetheart")
 
@@ -14,7 +13,6 @@ CLASSIFICATION_TYPES = (
     "bookmark", "podcast", "note", "ignore",
 )
 
-MODEL = "claude-sonnet-4-6"
 CONFIDENCE_THRESHOLD = 0.5
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 1.0
@@ -50,7 +48,7 @@ For ignore: action_detail can be empty {}"""
 
 
 class ClassifyAPIError(Exception):
-    """Raised when Claude API fails after all retries."""
+    """Raised when claude -p fails after all retries."""
     pass
 
 
@@ -66,34 +64,40 @@ async def classify(
     message_text: str,
     fetched_content: str,
     url: str,
-    api_key: str,
+    api_key: str = "",  # kept for interface compat, unused with claude -p
 ) -> Classification:
-    client = anthropic.AsyncAnthropic(api_key=api_key)
-    last_error = None
+    prompt = f"URL: {url}\n\nMessage context: {message_text}\n\nFetched content:\n{fetched_content}"
 
     for attempt in range(MAX_RETRIES):
         try:
-            response = await client.messages.create(
-                model=MODEL,
-                max_tokens=1024,
-                system=SYSTEM_PROMPT,
-                messages=[{
-                    "role": "user",
-                    "content": f"URL: {url}\n\nMessage context: {message_text}\n\nFetched content:\n{fetched_content}",
-                }],
+            result = subprocess.run(
+                [
+                    "claude", "-p",
+                    "--model", "sonnet",
+                    "--output-format", "text",
+                    "--system-prompt", SYSTEM_PROMPT,
+                    "--dangerously-skip-permissions",
+                ],
+                input=prompt,
+                capture_output=True,
+                text=True,
+                timeout=60,
             )
-            raw = response.content[0].text
+
+            if result.returncode != 0:
+                raise RuntimeError(f"claude -p exited {result.returncode}: {result.stderr.strip()}")
+
+            raw = result.stdout.strip()
             return _parse_response(raw, url)
 
-        except anthropic.APIError as e:
-            last_error = e
+        except (RuntimeError, subprocess.TimeoutExpired, FileNotFoundError) as e:
             if attempt < MAX_RETRIES - 1:
                 delay = INITIAL_RETRY_DELAY * (2 ** attempt)
-                logger.warning(f"Claude API error (attempt {attempt + 1}/{MAX_RETRIES}): {e}. Retrying in {delay}s...")
+                logger.warning(f"claude -p error (attempt {attempt + 1}/{MAX_RETRIES}): {e}. Retrying in {delay}s...")
                 time.sleep(delay)
             else:
-                logger.error(f"Claude API failed after {MAX_RETRIES} attempts: {e}")
-                raise ClassifyAPIError(f"API failed after {MAX_RETRIES} retries: {e}") from e
+                logger.error(f"claude -p failed after {MAX_RETRIES} attempts: {e}")
+                raise ClassifyAPIError(f"claude -p failed after {MAX_RETRIES} retries: {e}") from e
 
 
 def _parse_response(raw: str, url: str) -> Classification:

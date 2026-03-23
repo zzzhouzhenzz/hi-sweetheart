@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import os
 import sys
 from pathlib import Path
 
@@ -41,12 +40,6 @@ async def run_pipeline(
 
     state = State(state_path)
     summary = RunSummary()
-
-    api_key = os.environ.get(config.api_key_env, "")
-    if not api_key:
-        log.error(f"API key not found in env var: {config.api_key_env}")
-        send_notification("hi-sweetheart", f"ERROR: {config.api_key_env} not set")
-        return
 
     first_run = not state_path.exists()
 
@@ -101,7 +94,6 @@ async def run_pipeline(
                         message_text=msg.text,
                         fetched_content=fetch_result.text,
                         url=url,
-                        api_key=api_key,
                     )
                     log.info(f"Classified as: {classification.type} ({classification.confidence})")
 
