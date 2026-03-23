@@ -71,37 +71,65 @@ def test_action_note(tmp_path):
 
 
 @patch("hi_sweetheart.actions.subprocess")
-def test_action_podcast_calls_bookmark_binary(mock_subprocess, tmp_path):
+@patch("hi_sweetheart.actions.time")
+def test_action_podcast_saves_episode(mock_time, mock_subprocess, tmp_path):
+    """open URL → wait → JXA clicks Save Episode → 'saved'."""
     config = _make_config(tmp_path)
-    mock_subprocess.run.return_value = MagicMock(
-        returncode=0, stdout='{"status":"bookmarked"}', stderr="",
-    )
+    # First call: open -a Podcasts URL (succeeds)
+    # Second call: osascript JXA (returns "saved")
+    mock_subprocess.run.side_effect = [
+        MagicMock(returncode=0, stdout="", stderr=""),
+        MagicMock(returncode=0, stdout="saved\n", stderr=""),
+    ]
     c = Classification(
         type="podcast", confidence=0.95, summary="AI podcast",
-        action_detail={"podcast_url": "https://podcasts.apple.com/us/podcast/id123", "podcast_name": "AI Show"},
+        action_detail={"podcast_url": "https://podcasts.apple.com/us/podcast/id123?i=456", "podcast_name": "AI Show"},
     )
-    with patch("hi_sweetheart.actions.PODCAST_BOOKMARK_BIN", tmp_path / "fake-bin"):
-        (tmp_path / "fake-bin").touch()
-        action_podcast(c, config)
-    mock_subprocess.run.assert_called_once()
-    cmd = mock_subprocess.run.call_args[0][0]
-    assert "podcasts.apple.com" in cmd[1]
+    action_podcast(c, config)
+    assert mock_subprocess.run.call_count == 2
+    # First call opens Podcasts app with the URL
+    open_cmd = mock_subprocess.run.call_args_list[0][0][0]
+    assert open_cmd[0] == "open"
+    assert "podcasts.apple.com" in open_cmd[-1]
+    # Second call runs JXA
+    jxa_cmd = mock_subprocess.run.call_args_list[1][0][0]
+    assert jxa_cmd[0] == "osascript"
+    assert jxa_cmd[1] == "-l"
+    assert jxa_cmd[2] == "JavaScript"
 
 
 @patch("hi_sweetheart.actions.subprocess")
-def test_action_podcast_already_exists(mock_subprocess, tmp_path):
+@patch("hi_sweetheart.actions.time")
+def test_action_podcast_already_saved(mock_time, mock_subprocess, tmp_path):
+    """If episode is already saved, JXA returns 'already_saved' — no error."""
     config = _make_config(tmp_path)
-    mock_subprocess.run.return_value = MagicMock(
-        returncode=0, stdout='{"status":"exists"}', stderr="",
-    )
+    mock_subprocess.run.side_effect = [
+        MagicMock(returncode=0, stdout="", stderr=""),
+        MagicMock(returncode=0, stdout="already_saved\n", stderr=""),
+    ]
     c = Classification(
         type="podcast", confidence=0.95, summary="AI podcast",
-        action_detail={"podcast_url": "https://podcasts.apple.com/us/podcast/id123", "podcast_name": "AI Show"},
+        action_detail={"podcast_url": "https://podcasts.apple.com/us/podcast/id123?i=456", "podcast_name": "AI Show"},
     )
-    with patch("hi_sweetheart.actions.PODCAST_BOOKMARK_BIN", tmp_path / "fake-bin"):
-        (tmp_path / "fake-bin").touch()
-        action_podcast(c, config)
-    mock_subprocess.run.assert_called_once()
+    action_podcast(c, config)
+    assert mock_subprocess.run.call_count == 2
+
+
+@patch("hi_sweetheart.actions.subprocess")
+@patch("hi_sweetheart.actions.time")
+def test_action_podcast_button_not_found(mock_time, mock_subprocess, tmp_path):
+    """If Save Episode button not found (page didn't load), logs error."""
+    config = _make_config(tmp_path)
+    mock_subprocess.run.side_effect = [
+        MagicMock(returncode=0, stdout="", stderr=""),
+        MagicMock(returncode=0, stdout="not_found\n", stderr=""),
+    ]
+    c = Classification(
+        type="podcast", confidence=0.95, summary="AI podcast",
+        action_detail={"podcast_url": "https://podcasts.apple.com/us/podcast/id123?i=456", "podcast_name": "AI Show"},
+    )
+    action_podcast(c, config)
+    assert mock_subprocess.run.call_count == 2
 
 
 def test_action_podcast_skips_non_apple_url(tmp_path):
@@ -112,6 +140,21 @@ def test_action_podcast_skips_non_apple_url(tmp_path):
     )
     action_podcast(c, config)
     # Should not crash, just log warning
+
+
+@patch("hi_sweetheart.actions.subprocess")
+@patch("hi_sweetheart.actions.time")
+def test_action_podcast_open_fails(mock_time, mock_subprocess, tmp_path):
+    """If `open` command fails, bail out before JXA."""
+    config = _make_config(tmp_path)
+    mock_subprocess.run.return_value = MagicMock(returncode=1, stdout="", stderr="app not found")
+    c = Classification(
+        type="podcast", confidence=0.95, summary="AI podcast",
+        action_detail={"podcast_url": "https://podcasts.apple.com/us/podcast/id123?i=456", "podcast_name": "AI Show"},
+    )
+    action_podcast(c, config)
+    # Only the open call, no JXA call
+    assert mock_subprocess.run.call_count == 1
 
 
 def test_action_config_update(tmp_path):

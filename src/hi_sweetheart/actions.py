@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+import time
 import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -80,11 +81,54 @@ def action_note(classification: Classification, config: Config):
     logger.info(f"Noted: {classification.summary}")
 
 
-PODCAST_BOOKMARK_BIN = Path(__file__).parent.parent.parent / "tools" / "podcast-bookmark" / ".build" / "release" / "podcast-bookmark"
+SAVE_EPISODE_JXA = r"""
+function findSaveButton(element, depth) {
+    if (depth > 15) return null;
+    try {
+        var buttons = element.buttons();
+        for (var i = 0; i < buttons.length; i++) {
+            try {
+                if (buttons[i].description() === "Save Episode") {
+                    return buttons[i];
+                }
+            } catch(e) {}
+        }
+    } catch(e) {}
+    try {
+        var groups = element.groups();
+        for (var i = 0; i < groups.length; i++) {
+            var result = findSaveButton(groups[i], depth + 1);
+            if (result) return result;
+        }
+    } catch(e) {}
+    return null;
+}
+
+var podcasts = Application("System Events").processes["Podcasts"];
+var win = podcasts.windows[0];
+var btn = findSaveButton(win, 0);
+if (!btn) {
+    "not_found";
+} else if (btn.value() === "On") {
+    "already_saved";
+} else {
+    btn.click();
+    "saved";
+}
+"""
+
+PODCAST_OPEN_WAIT_SECS = 5
 
 
 def action_podcast(classification: Classification, config: Config):
-    """Bookmark podcast in Apple Podcasts app (silent, no subscribe)."""
+    """Save a podcast episode to Apple Podcasts library via UI automation.
+
+    1. Opens the Apple Podcasts URL (navigates Podcasts.app to the episode).
+    2. Waits for the page to load.
+    3. Uses JXA (osascript) to find and click the "Save Episode" button.
+
+    Saving through the app triggers iCloud sync across all Apple devices.
+    """
     detail = classification.action_detail
     url = detail.get("podcast_url", "")
     name = detail.get("podcast_name", "Untitled Podcast")
@@ -93,19 +137,36 @@ def action_podcast(classification: Classification, config: Config):
         logger.warning(f"Podcast URL not an Apple Podcasts link: {url}")
         return
 
-    if not PODCAST_BOOKMARK_BIN.exists():
-        logger.error(f"podcast-bookmark binary not found at {PODCAST_BOOKMARK_BIN}")
-        return
-
+    # Step 1: Open the episode in Podcasts.app
     result = subprocess.run(
-        [str(PODCAST_BOOKMARK_BIN), url],
-        capture_output=True, text=True, timeout=30,
+        ["open", "-a", "Podcasts", url],
+        capture_output=True, text=True, timeout=10,
     )
     if result.returncode != 0:
-        logger.error(f"podcast-bookmark failed: {result.stderr.strip()}")
+        logger.error(f"Failed to open Podcasts app: {result.stderr.strip()}")
         return
 
-    logger.info(f"Podcast bookmark result for {name}: {result.stdout.strip()}")
+    # Step 2: Wait for the episode page to load
+    time.sleep(PODCAST_OPEN_WAIT_SECS)
+
+    # Step 3: Click "Save Episode" via JXA
+    result = subprocess.run(
+        ["osascript", "-l", "JavaScript", "-e", SAVE_EPISODE_JXA],
+        capture_output=True, text=True, timeout=15,
+    )
+    if result.returncode != 0:
+        logger.error(f"JXA save failed: {result.stderr.strip()}")
+        return
+
+    status = result.stdout.strip()
+    if status == "saved":
+        logger.info(f"Saved episode: {name} ({url})")
+    elif status == "already_saved":
+        logger.info(f"Episode already saved: {name} ({url})")
+    elif status == "not_found":
+        logger.error(f"Save Episode button not found — page may not have loaded: {url}")
+    else:
+        logger.warning(f"Unexpected JXA result for {name}: {status}")
 
 
 def action_config_update(classification: Classification, config: Config):
