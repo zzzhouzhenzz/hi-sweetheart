@@ -104,6 +104,7 @@ async def run_pipeline(
                         message_text=msg.text,
                         fetched_content=fetch_result.text,
                         url=url,
+                        images=fetch_result.images,
                     )
                     log.info(f"Classified as: {classification.type} ({classification.confidence})")
 
