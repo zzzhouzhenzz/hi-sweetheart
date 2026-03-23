@@ -14,7 +14,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 
@@ -27,6 +27,7 @@ from hi_sweetheart.actions import (
     execute_action, action_bookmark, action_note, action_config_update,
     queue_pending, load_pending, approve_action, reject_action,
 )
+from hi_sweetheart.main import run_pipeline
 from hi_sweetheart.notify import RunSummary
 
 
@@ -556,3 +557,201 @@ class TestSummaryActionsIntegration:
     def test_empty_summary(self):
         summary = RunSummary()
         assert "No new messages" in summary.format()
+
+
+# ===========================================================================
+# Layer 8: dry-run mode (full pipeline, zero side effects)
+# ===========================================================================
+
+def _setup_pipeline_env(tmp_path, sender="+15551234567"):
+    """Create config, state, and DB for pipeline tests."""
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({
+        "sender": sender,
+        "mode": "auto",
+        "reading_list_path": str(tmp_path / "reading-list.md"),
+        "notes_path": str(tmp_path / "notes.md"),
+        "claude_settings_path": str(tmp_path / "settings.json"),
+        "claude_plugins_path": str(tmp_path / "plugins"),
+        "log_path": str(tmp_path / "runs.log"),
+        "pending_actions_path": str(tmp_path / "pending.json"),
+    }))
+
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps({"last_message_rowid": 0, "last_run": None}))
+
+    db_path = _make_db(tmp_path / "chat.db", sender, [
+        ("Check out https://example.com/article", 1),
+        ("Another https://example.com/tool", 2),
+    ])
+
+    return config_path, state_path, db_path
+
+
+class TestDryRunIntegration:
+    """Dry-run mode runs the full pipeline but writes nothing."""
+
+    @pytest.mark.asyncio
+    async def test_dry_run_does_not_write_files(self, tmp_path):
+        config_path, state_path, db_path = _setup_pipeline_env(tmp_path)
+
+        mock_fetch = AsyncMock(return_value=MagicMock(
+            success=True, text="Article about AI tools", url="https://example.com/article",
+        ))
+        mock_classify = AsyncMock(return_value=MagicMock(
+            type="bookmark", confidence=0.9, summary="AI tools article",
+            action_detail={"title": "AI Tools", "summary": "Great resource"},
+        ))
+
+        with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
+             patch("hi_sweetheart.main.classify", mock_classify), \
+             patch("hi_sweetheart.main.send_notification") as mock_notify:
+
+            await run_pipeline(
+                config_path=config_path,
+                state_path=state_path,
+                db_path=db_path,
+                dry_run=True,
+            )
+
+        # No reading list created
+        assert not (tmp_path / "reading-list.md").exists()
+        # No notes created
+        assert not (tmp_path / "notes.md").exists()
+        # Notification NOT sent
+        mock_notify.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_dry_run_does_not_advance_state(self, tmp_path):
+        config_path, state_path, db_path = _setup_pipeline_env(tmp_path)
+
+        mock_fetch = AsyncMock(return_value=MagicMock(
+            success=True, text="content", url="https://example.com/article",
+        ))
+        mock_classify = AsyncMock(return_value=MagicMock(
+            type="bookmark", confidence=0.9, summary="Bookmark",
+            action_detail={"title": "Title", "summary": "Summary"},
+        ))
+
+        with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
+             patch("hi_sweetheart.main.classify", mock_classify), \
+             patch("hi_sweetheart.main.send_notification"):
+
+            await run_pipeline(
+                config_path=config_path,
+                state_path=state_path,
+                db_path=db_path,
+                dry_run=True,
+            )
+
+        # State rowid must NOT have advanced
+        state = json.loads(state_path.read_text())
+        assert state["last_message_rowid"] == 0
+
+    @pytest.mark.asyncio
+    async def test_dry_run_still_classifies(self, tmp_path):
+        """Dry run should still call classify — it's read-only."""
+        config_path, state_path, db_path = _setup_pipeline_env(tmp_path)
+
+        mock_fetch = AsyncMock(return_value=MagicMock(
+            success=True, text="content", url="https://example.com/article",
+        ))
+        mock_classify = AsyncMock(return_value=MagicMock(
+            type="note", confidence=0.8, summary="A note",
+            action_detail={"content": "info"},
+        ))
+
+        with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
+             patch("hi_sweetheart.main.classify", mock_classify), \
+             patch("hi_sweetheart.main.send_notification"):
+
+            await run_pipeline(
+                config_path=config_path,
+                state_path=state_path,
+                db_path=db_path,
+                dry_run=True,
+            )
+
+        # Classify was called for each message's URL
+        assert mock_classify.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_dry_run_fetch_failure_no_note_written(self, tmp_path):
+        config_path, state_path, db_path = _setup_pipeline_env(tmp_path)
+
+        mock_fetch = AsyncMock(return_value=MagicMock(
+            success=False, text="", url="https://example.com", error="HTTP 404",
+        ))
+
+        with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
+             patch("hi_sweetheart.main.send_notification"):
+
+            await run_pipeline(
+                config_path=config_path,
+                state_path=state_path,
+                db_path=db_path,
+                dry_run=True,
+            )
+
+        # No note file created despite fetch failure
+        assert not (tmp_path / "notes.md").exists()
+        # State not advanced
+        state = json.loads(state_path.read_text())
+        assert state["last_message_rowid"] == 0
+
+    @pytest.mark.asyncio
+    async def test_dry_run_logs_what_would_happen(self, tmp_path):
+        config_path, state_path, db_path = _setup_pipeline_env(tmp_path)
+
+        mock_fetch = AsyncMock(return_value=MagicMock(
+            success=True, text="content", url="https://example.com/article",
+        ))
+        mock_classify = AsyncMock(return_value=MagicMock(
+            type="bookmark", confidence=0.9, summary="Cool article",
+            action_detail={"title": "Cool", "summary": "Article"},
+        ))
+
+        with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
+             patch("hi_sweetheart.main.classify", mock_classify), \
+             patch("hi_sweetheart.main.send_notification"):
+
+            await run_pipeline(
+                config_path=config_path,
+                state_path=state_path,
+                db_path=db_path,
+                dry_run=True,
+            )
+
+        # Log file should contain DRY RUN markers
+        log_content = (tmp_path / "runs.log").read_text()
+        assert "DRY RUN" in log_content
+
+    @pytest.mark.asyncio
+    async def test_normal_run_still_writes(self, tmp_path):
+        """Sanity check: without dry_run, side effects happen normally."""
+        config_path, state_path, db_path = _setup_pipeline_env(tmp_path)
+
+        mock_fetch = AsyncMock(return_value=MagicMock(
+            success=True, text="content", url="https://example.com/article",
+        ))
+        mock_classify = AsyncMock(return_value=MagicMock(
+            type="bookmark", confidence=0.9, summary="Article",
+            action_detail={"title": "Article", "summary": "Content"},
+        ))
+
+        with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
+             patch("hi_sweetheart.main.classify", mock_classify), \
+             patch("hi_sweetheart.main.send_notification"):
+
+            await run_pipeline(
+                config_path=config_path,
+                state_path=state_path,
+                db_path=db_path,
+                dry_run=False,
+            )
+
+        # Files WERE written
+        assert (tmp_path / "reading-list.md").exists()
+        # State WAS advanced
+        state = json.loads(state_path.read_text())
+        assert state["last_message_rowid"] == 2

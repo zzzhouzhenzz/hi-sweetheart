@@ -30,13 +30,17 @@ async def run_pipeline(
     state_path: Path = DEFAULT_STATE_PATH,
     db_path: Path = IMESSAGE_DB_PATH,
     mode_override: str | None = None,
+    dry_run: bool = False,
 ):
     config = load_config(config_path)
     if mode_override:
         config.mode = mode_override
 
     log = setup_logging(config.log_path)
-    log.info("=== hi-sweetheart run started ===")
+    if dry_run:
+        log.info("=== hi-sweetheart DRY RUN started (no side effects) ===")
+    else:
+        log.info("=== hi-sweetheart run started ===")
 
     state = State(state_path)
     summary = RunSummary()
@@ -52,13 +56,15 @@ async def run_pipeline(
     except Exception as e:
         log.error(f"Failed to read iMessage DB: {e}")
         summary.add_error(f"DB read failed: {e}")
-        send_notification("hi-sweetheart", summary.format())
+        if not dry_run:
+            send_notification("hi-sweetheart", summary.format())
         return
 
     log.info(f"Found {len(messages)} new messages")
 
     if not messages:
-        send_notification("hi-sweetheart", summary.format())
+        if not dry_run:
+            send_notification("hi-sweetheart", summary.format())
         return
 
     for msg in messages:
@@ -68,8 +74,9 @@ async def run_pipeline(
 
             if not urls and not has_actionable_content(msg.text):
                 log.info(f"Message {msg.rowid}: no URLs or actionable content, skipping")
-                state.update(msg.rowid)
-                state.save()
+                if not dry_run:
+                    state.update(msg.rowid)
+                    state.save()
                 continue
 
             if urls:
@@ -85,7 +92,10 @@ async def run_pipeline(
                             summary=f"Failed to fetch: {url}",
                             action_detail={"content": f"URL fetch failed ({fetch_result.error}): {url}"},
                         )
-                        execute_action(note, config)
+                        if not dry_run:
+                            execute_action(note, config)
+                        else:
+                            log.info(f"[DRY RUN] Would create note for fetch failure: {url}")
                         summary.add_error(f"Fetch failed: {url}")
                         continue
 
@@ -97,7 +107,11 @@ async def run_pipeline(
                     )
                     log.info(f"Classified as: {classification.type} ({classification.confidence})")
 
-                    result = execute_action(classification, config)
+                    if not dry_run:
+                        result = execute_action(classification, config)
+                    else:
+                        result = f"[DRY RUN] Would execute: {classification.type} — {classification.summary}"
+                        log.info(result)
                     summary.add(classification.type, result)
             else:
                 # Actionable text content without URL
@@ -106,13 +120,17 @@ async def run_pipeline(
                     message_text=msg.text,
                     fetched_content=msg.text,
                     url="(no url)",
-                    api_key=api_key,
                 )
-                result = execute_action(classification, config)
+                if not dry_run:
+                    result = execute_action(classification, config)
+                else:
+                    result = f"[DRY RUN] Would execute: {classification.type} — {classification.summary}"
+                    log.info(result)
                 summary.add(classification.type, result)
 
-            state.update(msg.rowid)
-            state.save()
+            if not dry_run:
+                state.update(msg.rowid)
+                state.save()
 
         except ClassifyAPIError as e:
             # API failed after retries — abort run, don't advance ROWID
@@ -124,13 +142,15 @@ async def run_pipeline(
             # Action execution failures — advance ROWID, continue
             log.error(f"Failed to process message {msg.rowid}: {e}")
             summary.add_error(f"Message {msg.rowid}: {e}")
-            state.update(msg.rowid)
-            state.save()
+            if not dry_run:
+                state.update(msg.rowid)
+                state.save()
 
     log.info("=== Run complete ===")
     notification_text = summary.format()
     log.info(notification_text)
-    send_notification("hi-sweetheart", notification_text)
+    if not dry_run:
+        send_notification("hi-sweetheart", notification_text)
 
 
 def cmd_run(args):
@@ -138,6 +158,7 @@ def cmd_run(args):
         config_path=Path(args.config),
         state_path=Path(args.state).expanduser(),
         mode_override=args.mode,
+        dry_run=args.dry_run,
     ))
 
 
@@ -183,6 +204,7 @@ def main():
 
     run_parser = subparsers.add_parser("run", help="Execute one pipeline run")
     run_parser.add_argument("--mode", choices=["auto", "tiered", "propose"], help="Override execution mode")
+    run_parser.add_argument("--dry-run", action="store_true", help="Run full pipeline with zero side effects (no writes, no state advance, no notifications)")
     run_parser.set_defaults(func=cmd_run)
 
     pending_parser = subparsers.add_parser("pending", help="List pending actions")
