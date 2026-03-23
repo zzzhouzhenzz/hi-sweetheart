@@ -23,7 +23,10 @@ from hi_sweetheart.config import Config, load_config
 from hi_sweetheart.reader import read_messages, _datetime_to_imessage_ns, IMESSAGE_EPOCH
 from hi_sweetheart.fetcher import extract_urls, has_actionable_content
 from hi_sweetheart.classifier import Classification, _parse_response, classify, ClassifyAPIError
-from hi_sweetheart.actions import execute_action, action_note
+from hi_sweetheart.actions import (
+    execute_action, action_bookmark, action_note, action_config_update,
+    queue_pending, load_pending, approve_action, reject_action,
+)
 from hi_sweetheart.main import run_pipeline
 from hi_sweetheart.notify import RunSummary
 
@@ -227,26 +230,26 @@ class TestFetcherIntegration:
 class TestClassifierParseIntegration:
     """Classifier parsing + confidence gating work together."""
 
-    def test_high_confidence_note(self):
+    def test_high_confidence_bookmark(self):
         raw = json.dumps({
-            "type": "note",
+            "type": "bookmark",
             "confidence": 0.9,
-            "summary": "Great article about AI",
-            "action_detail": {"content": "Key takeaway about AI trends"},
+            "summary": "Great article",
+            "action_detail": {"title": "AI News", "summary": "Latest trends"},
         })
         result = _parse_response(raw, "https://example.com")
-        assert result.type == "note"
+        assert result.type == "bookmark"
         assert result.confidence == 0.9
-        assert result.action_detail["content"] == "Key takeaway about AI trends"
+        assert result.action_detail["title"] == "AI News"
 
     def test_low_confidence_downgrades_to_note(self):
         raw = json.dumps({
-            "type": "podcast",
+            "type": "plugin_install",
             "confidence": 0.3,
-            "summary": "Maybe a podcast?",
-            "action_detail": {"podcast_url": "https://x.com", "podcast_name": "test"},
+            "summary": "Maybe a plugin?",
+            "action_detail": {"repo_url": "https://github.com/x/y"},
         })
-        result = _parse_response(raw, "https://example.com")
+        result = _parse_response(raw, "https://github.com/x/y")
         assert result.type == "note"  # downgraded
 
     def test_unknown_type_defaults_to_note(self):
@@ -268,10 +271,10 @@ class TestClassifierParseIntegration:
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout=json.dumps({
-                "type": "note",
+                "type": "bookmark",
                 "confidence": 0.85,
                 "summary": "A cool tool",
-                "action_detail": {"content": "Tool that does stuff"},
+                "action_detail": {"title": "Tool", "summary": "Does stuff"},
             }),
         )
         import asyncio
@@ -280,14 +283,14 @@ class TestClassifierParseIntegration:
             fetched_content="content here",
             url="https://example.com",
         ))
-        assert result.type == "note"
+        assert result.type == "bookmark"
         assert mock_run.called
 
     def test_json_with_trailing_text(self):
         """Claude sometimes returns valid JSON followed by extra text."""
-        raw = '{"type": "note", "confidence": 0.95, "summary": "6 settings tips", "action_detail": {"content": "Use auto-compact"}}Some trailing explanation text here'
+        raw = '{"type": "config_update", "confidence": 0.95, "summary": "6 settings", "action_detail": {"settings": {}}}Some trailing explanation text here'
         result = _parse_response(raw, "https://example.com")
-        assert result.type == "note"
+        assert result.type == "config_update"
         assert result.confidence == 0.95
 
     def test_json_wrapped_in_code_fences_with_trailing(self):
@@ -319,19 +322,19 @@ class TestClassifierParseIntegration:
 # ===========================================================================
 
 class TestActionsFilesystemIntegration:
-    """Actions write to real files."""
+    """Actions write to real files, queue/approve/reject with real JSON."""
 
-    def test_note_creates_file(self, tmp_path):
+    def test_bookmark_creates_reading_list(self, tmp_path):
         config = _make_config(tmp_path)
         c = Classification(
-            type="note", confidence=0.9, summary="Good read about AI",
-            action_detail={"content": "Key takeaway: transformers are neat"},
+            type="bookmark", confidence=0.9, summary="Good read",
+            action_detail={"title": "AI Paper", "summary": "Transformers are neat"},
         )
         result = execute_action(c, config)
         assert "Executed" in result
-        content = config.notes_path.read_text()
-        assert "Good read about AI" in content
-        assert "transformers are neat" in content
+        content = config.reading_list_path.read_text()
+        assert "AI Paper" in content
+        assert "Transformers are neat" in content
 
     def test_note_appends_to_existing(self, tmp_path):
         config = _make_config(tmp_path)
@@ -348,6 +351,101 @@ class TestActionsFilesystemIntegration:
         assert "Tip about caching" in content
         assert "Redis" in content
 
+    def test_config_update_merges_and_backs_up(self, tmp_path):
+        config = _make_config(tmp_path)
+        config.claude_settings_path.write_text(json.dumps({"theme": "dark", "plugins": ["a"]}))
+
+        c = Classification(
+            type="config_update", confidence=0.9, summary="Add plugin b",
+            action_detail={"settings": {"plugins": ["b"], "new_key": True}},
+        )
+        execute_action(c, config)
+
+        # Backup exists
+        assert config.claude_settings_path.with_suffix(".json.bak").exists()
+
+        merged = json.loads(config.claude_settings_path.read_text())
+        assert merged["theme"] == "dark"
+        assert merged["plugins"] == ["a", "b"]  # lists concatenated
+        assert merged["new_key"] is True
+
+    def test_tiered_mode_queues_risky_actions(self, tmp_path):
+        config = _make_config(tmp_path)
+        config.mode = "tiered"
+
+        c = Classification(
+            type="plugin_install", confidence=0.9, summary="Install cool plugin",
+            action_detail={"repo_url": "https://github.com/x/y", "plugin_name": "cool", "install_steps": ["echo hi"]},
+        )
+        result = execute_action(c, config)
+        assert "Queued" in result
+
+        pending = load_pending(config)
+        assert len(pending) == 1
+        assert pending[0]["classification"]["type"] == "plugin_install"
+
+    def test_tiered_mode_executes_safe_actions(self, tmp_path):
+        config = _make_config(tmp_path)
+        config.mode = "tiered"
+
+        c = Classification(
+            type="bookmark", confidence=0.9, summary="Safe bookmark",
+            action_detail={"title": "Article", "summary": "Content"},
+        )
+        result = execute_action(c, config)
+        assert "Executed" in result
+
+    def test_propose_mode_queues_everything(self, tmp_path):
+        config = _make_config(tmp_path)
+        config.mode = "propose"
+
+        c = Classification(
+            type="bookmark", confidence=0.9, summary="Even bookmarks queued",
+            action_detail={"title": "Article", "summary": "Content"},
+        )
+        result = execute_action(c, config)
+        assert "Queued" in result
+
+    def test_approve_executes_and_removes_from_queue(self, tmp_path):
+        config = _make_config(tmp_path)
+        config.mode = "propose"
+
+        c = Classification(
+            type="note", confidence=0.9, summary="A note to approve",
+            action_detail={"content": "Important info"},
+        )
+        execute_action(c, config)
+
+        pending = load_pending(config)
+        action_id = pending[0]["id"]
+
+        approve_action(action_id, config)
+
+        # Queue is now empty
+        assert load_pending(config) == []
+        # Note was written
+        assert config.notes_path.exists()
+        assert "Important info" in config.notes_path.read_text()
+
+    def test_reject_removes_from_queue_no_side_effects(self, tmp_path):
+        config = _make_config(tmp_path)
+        config.mode = "propose"
+
+        c = Classification(
+            type="bookmark", confidence=0.9, summary="Reject me",
+            action_detail={"title": "Nope", "summary": "Don't want"},
+        )
+        execute_action(c, config)
+
+        pending = load_pending(config)
+        action_id = pending[0]["id"]
+
+        reject_action(action_id, config)
+
+        assert load_pending(config) == []
+        # Reading list was NOT created
+        assert not config.reading_list_path.exists()
+
     def test_ignore_does_nothing(self, tmp_path):
         config = _make_config(tmp_path)
         c = Classification(type="ignore", confidence=0.95, summary="Not relevant")
@@ -363,7 +461,7 @@ class TestReaderClassifierActionsIntegration:
     """Messages flow from DB through classification to action execution."""
 
     @patch("hi_sweetheart.classifier.subprocess.run")
-    def test_message_to_note_end_to_end(self, mock_claude, tmp_path):
+    def test_message_to_bookmark_end_to_end(self, mock_claude, tmp_path):
         sender = "+15551234567"
         db_path = _make_db(tmp_path / "chat.db", sender, [
             ("Check out https://example.com/cool-article", 1),
@@ -382,10 +480,10 @@ class TestReaderClassifierActionsIntegration:
         mock_claude.return_value = MagicMock(
             returncode=0,
             stdout=json.dumps({
-                "type": "note",
+                "type": "bookmark",
                 "confidence": 0.9,
                 "summary": "Cool article about AI",
-                "action_detail": {"content": "AI trends 2026 — key takeaway"},
+                "action_detail": {"title": "Cool Article", "summary": "AI trends 2026"},
             }),
         )
         import asyncio
@@ -394,12 +492,12 @@ class TestReaderClassifierActionsIntegration:
             fetched_content="fetched page content",
             url=urls[0],
         ))
-        assert classification.type == "note"
+        assert classification.type == "bookmark"
 
         # Step 4: execute action
         result = execute_action(classification, config)
         assert "Executed" in result
-        assert "AI trends 2026" in config.notes_path.read_text()
+        assert "Cool Article" in config.reading_list_path.read_text()
 
     @patch("hi_sweetheart.classifier.subprocess.run")
     def test_low_confidence_becomes_note(self, mock_claude, tmp_path):
@@ -415,10 +513,10 @@ class TestReaderClassifierActionsIntegration:
         mock_claude.return_value = MagicMock(
             returncode=0,
             stdout=json.dumps({
-                "type": "podcast",
+                "type": "plugin_install",
                 "confidence": 0.3,
-                "summary": "Maybe a podcast",
-                "action_detail": {"podcast_url": urls[0], "podcast_name": "test"},
+                "summary": "Maybe a plugin",
+                "action_detail": {"repo_url": urls[0]},
             }),
         )
 
@@ -447,13 +545,13 @@ class TestSummaryActionsIntegration:
         config = _make_config(tmp_path)
         summary = RunSummary()
 
-        # Successful note
+        # Successful bookmark
         c1 = Classification(
-            type="note", confidence=0.9, summary="Good article about AI",
-            action_detail={"content": "AI trends"},
+            type="bookmark", confidence=0.9, summary="Good article",
+            action_detail={"title": "AI News", "summary": "Trends"},
         )
         result = execute_action(c1, config)
-        summary.add("note", result)
+        summary.add("bookmark", result)
 
         # Ignore
         c2 = Classification(type="ignore", confidence=0.95, summary="Spam")
@@ -464,7 +562,7 @@ class TestSummaryActionsIntegration:
         summary.add_error("Fetch failed: https://broken.com")
 
         text = summary.format()
-        assert "note" in text
+        assert "bookmark" in text
         assert "ignore" in text
         assert "1 error(s)" in text
         assert "broken.com" in text
@@ -514,8 +612,8 @@ class TestDryRunIntegration:
             success=True, text="Article about AI tools", url="https://example.com/article",
         ))
         mock_classify = AsyncMock(return_value=MagicMock(
-            type="note", confidence=0.9, summary="AI tools article",
-            action_detail={"content": "Great resource about AI tools"},
+            type="bookmark", confidence=0.9, summary="AI tools article",
+            action_detail={"title": "AI Tools", "summary": "Great resource"},
         ))
 
         with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
@@ -529,6 +627,8 @@ class TestDryRunIntegration:
                 dry_run=True,
             )
 
+        # No reading list created
+        assert not (tmp_path / "reading-list.md").exists()
         # No notes created
         assert not (tmp_path / "notes.md").exists()
         # Notification NOT sent
@@ -542,8 +642,8 @@ class TestDryRunIntegration:
             success=True, text="content", url="https://example.com/article",
         ))
         mock_classify = AsyncMock(return_value=MagicMock(
-            type="note", confidence=0.9, summary="A note",
-            action_detail={"content": "Some info"},
+            type="bookmark", confidence=0.9, summary="Bookmark",
+            action_detail={"title": "Title", "summary": "Summary"},
         ))
 
         with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
@@ -620,8 +720,8 @@ class TestDryRunIntegration:
             success=True, text="content", url="https://example.com/article",
         ))
         mock_classify = AsyncMock(return_value=MagicMock(
-            type="note", confidence=0.9, summary="Cool article",
-            action_detail={"content": "Info about cool article"},
+            type="bookmark", confidence=0.9, summary="Cool article",
+            action_detail={"title": "Cool", "summary": "Article"},
         ))
 
         with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
@@ -648,8 +748,8 @@ class TestDryRunIntegration:
             success=True, text="content", url="https://example.com/article",
         ))
         mock_classify = AsyncMock(return_value=MagicMock(
-            type="note", confidence=0.9, summary="Article",
-            action_detail={"content": "Article content"},
+            type="bookmark", confidence=0.9, summary="Article",
+            action_detail={"title": "Article", "summary": "Content"},
         ))
 
         with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
@@ -663,8 +763,8 @@ class TestDryRunIntegration:
                 dry_run=False,
             )
 
-        # Notes WERE written
-        assert (tmp_path / "notes.md").exists()
+        # Files WERE written
+        assert (tmp_path / "reading-list.md").exists()
         # State WAS advanced
         state = json.loads(state_path.read_text())
         assert state["last_message_rowid"] == 2
