@@ -71,7 +71,7 @@ def read_messages(
         params: list = [sender, after_rowid, sender]
 
         if first_run and after_rowid == 0:
-            cutoff = _datetime_to_imessage_ns(datetime.now(timezone.utc) - timedelta(hours=24))
+            cutoff = _datetime_to_imessage_ns(datetime.now(timezone.utc) - timedelta(days=3))
             query += "  AND m.date > ?\n"
             params.append(cutoff)
 

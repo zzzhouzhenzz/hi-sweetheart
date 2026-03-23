@@ -22,7 +22,7 @@ def _setup_environment(tmp_path) -> dict:
     }))
 
     state_path = tmp_path / "state.json"
-    # Pre-create state so first_run=False (avoids 24h date filter on test data)
+    # Pre-create state so first_run=False (avoids 3-day date filter on test data)
     state_path.write_text(json.dumps({"last_message_rowid": 0, "last_run": None}))
 
     db_path = tmp_path / "chat.db"
