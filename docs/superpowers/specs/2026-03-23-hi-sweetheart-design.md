@@ -50,8 +50,8 @@ Classification is LLM-driven based on **fetched link content**, not message text
 
 | Type | What the link points to | Action |
 |---|---|---|
-| `plugin_install` | A Claude Code plugin repo (contains `package.json` with plugin manifest) | `git clone` into plugin cache dir, register in `installed_plugins.json`, enable in `settings.json` |
-| `marketplace_install` | A plugin marketplace repo (contains marketplace manifest) | Add to `extraKnownMarketplaces` in `settings.json`, then clone and register all plugins from the marketplace |
+| `plugin_install` | A Claude Code plugin repo | LLM reads the repo's README/install docs, extracts the recommended installation steps, and executes them (may involve marketplace add, git clone, build commands, config changes — whatever the repo recommends) |
+| `marketplace_install` | A plugin marketplace repo | LLM reads the marketplace repo docs, adds to `extraKnownMarketplaces` in `settings.json`, then follows the repo's instructions to install and enable available plugins |
 | `config_update` | Settings snippet, blog post with config tips | Deep merge into `~/.claude/settings.json`. New keys added, existing scalar values overwritten, arrays appended, objects merged recursively. Backup created before write. |
 | `bookmark` | Article, doc, tutorial | Save URL + LLM summary to configurable reading list path |
 | `podcast` | Apple Podcasts link | Subscribe via `open "podcasts://"` URL scheme (triggers Apple Podcasts to add/subscribe) |
@@ -73,7 +73,8 @@ Prompt sends the fetched content and asks for a JSON response:
   "summary": "One-line description of what this is",
   "action_detail": {
     // type-specific fields, e.g.:
-    // plugin_install: {"repo_url": "...", "plugin_name": "..."}
+    // plugin_install: {"repo_url": "...", "plugin_name": "...", "install_steps": ["step1", "step2"]}
+    // marketplace_install: {"repo_url": "...", "marketplace_name": "...", "install_steps": ["step1", "step2"]}
     // config_update: {"settings": {...}}
     // bookmark: {"title": "...", "summary": "..."}
     // podcast: {"podcast_url": "...", "podcast_name": "..."}
