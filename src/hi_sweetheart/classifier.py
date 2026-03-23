@@ -18,6 +18,7 @@ CLASSIFICATION_TYPES = (
 CONFIDENCE_THRESHOLD = 0.5
 MAX_RETRIES = 3
 INITIAL_RETRY_DELAY = 1.0
+MAX_CONTENT_CHARS = 4000  # Cap content to avoid truncated classifier output
 
 SYSTEM_PROMPT = """You are a content classifier for a Claude Code automation tool.
 
@@ -81,7 +82,8 @@ async def _classify_with_claude_cli(
     url: str,
 ) -> Classification:
     """Classify using claude -p CLI (text-only, fast, low cost)."""
-    prompt = f"URL: {url}\n\nMessage context: {message_text}\n\nFetched content:\n{fetched_content}"
+    content = fetched_content[:MAX_CONTENT_CHARS]
+    prompt = f"URL: {url}\n\nMessage context: {message_text}\n\nFetched content:\n{content}"
 
     for attempt in range(MAX_RETRIES):
         try:
