@@ -81,14 +81,23 @@ def action_note(classification: Classification, config: Config):
 
 
 def action_podcast(classification: Classification, config: Config):
+    """Bookmark podcast to reading list (skip if already bookmarked)."""
     detail = classification.action_detail
     url = detail.get("podcast_url", "")
-    if "podcasts.apple.com" in url:
-        subscribe_url = url.replace("https://", "podcasts://")
+    name = detail.get("podcast_name", "Untitled Podcast")
+
+    path = config.reading_list_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if path.exists():
+        existing = path.read_text()
+        if url in existing:
+            logger.info(f"Podcast already bookmarked: {url}")
+            return
+        path.write_text(existing + f"\n## 🎙 {name}\n\n{url}\n")
     else:
-        subscribe_url = url
-    subprocess.run(["open", subscribe_url], capture_output=True, timeout=10)
-    logger.info(f"Subscribed to podcast: {detail.get('podcast_name', 'unknown')}")
+        path.write_text(f"# Reading List\n\n## 🎙 {name}\n\n{url}\n")
+    logger.info(f"Bookmarked podcast: {name}")
 
 
 def action_config_update(classification: Classification, config: Config):

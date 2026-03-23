@@ -70,18 +70,28 @@ def test_action_note(tmp_path):
     assert "Set up hooks" in content
 
 
-@patch("hi_sweetheart.actions.subprocess")
-def test_action_podcast(mock_subprocess, tmp_path):
+def test_action_podcast_bookmarks(tmp_path):
     config = _make_config(tmp_path)
     c = Classification(
         type="podcast", confidence=0.95, summary="AI podcast",
         action_detail={"podcast_url": "https://podcasts.apple.com/us/podcast/id123", "podcast_name": "AI Show"},
     )
     action_podcast(c, config)
-    mock_subprocess.run.assert_called_once()
-    cmd = mock_subprocess.run.call_args[0][0]
-    assert "open" in cmd
-    assert "podcasts://" in cmd[1]
+    content = config.reading_list_path.read_text()
+    assert "AI Show" in content
+    assert "podcasts.apple.com" in content
+
+
+def test_action_podcast_dedup(tmp_path):
+    config = _make_config(tmp_path)
+    c = Classification(
+        type="podcast", confidence=0.95, summary="AI podcast",
+        action_detail={"podcast_url": "https://podcasts.apple.com/us/podcast/id123", "podcast_name": "AI Show"},
+    )
+    action_podcast(c, config)
+    action_podcast(c, config)  # second call should be a no-op
+    content = config.reading_list_path.read_text()
+    assert content.count("podcasts.apple.com/us/podcast/id123") == 1
 
 
 def test_action_config_update(tmp_path):
