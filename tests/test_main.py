@@ -154,7 +154,7 @@ async def test_full_pipeline_tiered_mode(tmp_path):
 
     call_count = 0
 
-    async def mock_classify(message_text, fetched_content, url, images=None):
+    async def mock_classify(message_text, fetched_content, url):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
