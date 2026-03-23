@@ -122,6 +122,7 @@ async def run_pipeline(
                         url=url,
                     )
                     log.info(f"Classified as: {classification.type} ({classification.confidence})")
+                    classification.action_detail.setdefault("source_url", url)
 
                     if not dry_run:
                         result = execute_action(classification, config)
@@ -155,10 +156,16 @@ async def run_pipeline(
             break
 
         except Exception as e:
-            # Action execution failures — advance ROWID, continue
+            # Action execution failures — save as note for manual processing, advance ROWID
             log.error(f"Failed to process message {msg.rowid}: {e}")
             summary.add_error(f"Message {msg.rowid}: {e}")
             if not dry_run:
+                fallback_note = Classification(
+                    type="note", confidence=0.0,
+                    summary=f"[FAILED] {e}",
+                    action_detail={"content": f"Action failed: {e}\n\nOriginal message: {msg.text[:500]}"},
+                )
+                execute_action(fallback_note, config)
                 state.update(msg.rowid)
                 state.save()
 

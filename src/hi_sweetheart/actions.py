@@ -58,13 +58,16 @@ def action_bookmark(classification: Classification, config: Config):
     path = config.reading_list_path
     path.parent.mkdir(parents=True, exist_ok=True)
     detail = classification.action_detail
-    entry = f"\n## {detail.get('title', 'Untitled')}\n\n{detail.get('summary', '')}\n"
+    title = detail.get('title', 'Untitled')
+    source_url = detail.get('source_url', '')
+    heading = f"[{title}]({source_url})" if source_url else title
+    entry = f"\n## {heading}\n\n{detail.get('summary', '')}\n"
     if path.exists():
         existing = path.read_text()
         path.write_text(existing + entry)
     else:
         path.write_text(f"# Reading List\n{entry}")
-    logger.info(f"Bookmarked: {detail.get('title', 'unknown')}")
+    logger.info(f"Bookmarked: {title}")
 
 
 def action_note(classification: Classification, config: Config):
@@ -72,7 +75,9 @@ def action_note(classification: Classification, config: Config):
     path.parent.mkdir(parents=True, exist_ok=True)
     detail = classification.action_detail
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
-    entry = f"\n## {timestamp} — {classification.summary}\n\n{detail.get('content', '')}\n"
+    source_url = detail.get('source_url', '')
+    url_line = f"\n\n{source_url}" if source_url else ""
+    entry = f"\n## {timestamp} — {classification.summary}\n\n{detail.get('content', '')}{url_line}\n"
     if path.exists():
         existing = path.read_text()
         path.write_text(existing + entry)
