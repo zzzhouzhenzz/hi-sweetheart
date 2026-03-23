@@ -1,0 +1,13 @@
+{
+  "": {
+    "dependencies": "/Users/zhouzhen24/Documents/coding/ml/hi-sweetheart/tools/podcast-bookmark/.build/arm64-apple-macosx/release/podcast_bookmark.build/podcast_bookmark.d",
+    "object": "/Users/zhouzhen24/Documents/coding/ml/hi-sweetheart/tools/podcast-bookmark/.build/arm64-apple-macosx/release/podcast_bookmark.build/podcast_bookmark.o",
+    "swift-dependencies": "/Users/zhouzhen24/Documents/coding/ml/hi-sweetheart/tools/podcast-bookmark/.build/arm64-apple-macosx/release/podcast_bookmark.build/master.swiftdeps"
+  },
+  "/Users/zhouzhen24/Documents/coding/ml/hi-sweetheart/tools/podcast-bookmark/Sources/main.swift": {
+    "object": "/Users/zhouzhen24/Documents/coding/ml/hi-sweetheart/tools/podcast-bookmark/.build/arm64-apple-macosx/release/podcast_bookmark.build/main.swift.o",
+    "swiftmodule": "/Users/zhouzhen24/Documents/coding/ml/hi-sweetheart/tools/podcast-bookmark/.build/arm64-apple-macosx/release/podcast_bookmark.build/main~partial.swiftmodule",
+    "swift-dependencies": "/Users/zhouzhen24/Documents/coding/ml/hi-sweetheart/tools/podcast-bookmark/.build/arm64-apple-macosx/release/podcast_bookmark.build/main.swiftdeps",
+    "diagnostics": "/Users/zhouzhen24/Documents/coding/ml/hi-sweetheart/tools/podcast-bookmark/.build/arm64-apple-macosx/release/podcast_bookmark.build/main.dia"
+  }
+}

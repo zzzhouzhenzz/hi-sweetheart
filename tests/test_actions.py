@@ -70,28 +70,48 @@ def test_action_note(tmp_path):
     assert "Set up hooks" in content
 
 
-def test_action_podcast_bookmarks(tmp_path):
+@patch("hi_sweetheart.actions.subprocess")
+def test_action_podcast_calls_bookmark_binary(mock_subprocess, tmp_path):
     config = _make_config(tmp_path)
+    mock_subprocess.run.return_value = MagicMock(
+        returncode=0, stdout='{"status":"bookmarked"}', stderr="",
+    )
     c = Classification(
         type="podcast", confidence=0.95, summary="AI podcast",
         action_detail={"podcast_url": "https://podcasts.apple.com/us/podcast/id123", "podcast_name": "AI Show"},
     )
-    action_podcast(c, config)
-    content = config.reading_list_path.read_text()
-    assert "AI Show" in content
-    assert "podcasts.apple.com" in content
+    with patch("hi_sweetheart.actions.PODCAST_BOOKMARK_BIN", tmp_path / "fake-bin"):
+        (tmp_path / "fake-bin").touch()
+        action_podcast(c, config)
+    mock_subprocess.run.assert_called_once()
+    cmd = mock_subprocess.run.call_args[0][0]
+    assert "podcasts.apple.com" in cmd[1]
 
 
-def test_action_podcast_dedup(tmp_path):
+@patch("hi_sweetheart.actions.subprocess")
+def test_action_podcast_already_exists(mock_subprocess, tmp_path):
     config = _make_config(tmp_path)
+    mock_subprocess.run.return_value = MagicMock(
+        returncode=0, stdout='{"status":"exists"}', stderr="",
+    )
     c = Classification(
         type="podcast", confidence=0.95, summary="AI podcast",
         action_detail={"podcast_url": "https://podcasts.apple.com/us/podcast/id123", "podcast_name": "AI Show"},
     )
+    with patch("hi_sweetheart.actions.PODCAST_BOOKMARK_BIN", tmp_path / "fake-bin"):
+        (tmp_path / "fake-bin").touch()
+        action_podcast(c, config)
+    mock_subprocess.run.assert_called_once()
+
+
+def test_action_podcast_skips_non_apple_url(tmp_path):
+    config = _make_config(tmp_path)
+    c = Classification(
+        type="podcast", confidence=0.95, summary="Random podcast",
+        action_detail={"podcast_url": "https://example.com/podcast", "podcast_name": "Test"},
+    )
     action_podcast(c, config)
-    action_podcast(c, config)  # second call should be a no-op
-    content = config.reading_list_path.read_text()
-    assert content.count("podcasts.apple.com/us/podcast/id123") == 1
+    # Should not crash, just log warning
 
 
 def test_action_config_update(tmp_path):

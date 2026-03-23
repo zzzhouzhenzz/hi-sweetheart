@@ -80,24 +80,32 @@ def action_note(classification: Classification, config: Config):
     logger.info(f"Noted: {classification.summary}")
 
 
+PODCAST_BOOKMARK_BIN = Path(__file__).parent.parent.parent / "tools" / "podcast-bookmark" / ".build" / "release" / "podcast-bookmark"
+
+
 def action_podcast(classification: Classification, config: Config):
-    """Bookmark podcast to reading list (skip if already bookmarked)."""
+    """Bookmark podcast in Apple Podcasts app (silent, no subscribe)."""
     detail = classification.action_detail
     url = detail.get("podcast_url", "")
     name = detail.get("podcast_name", "Untitled Podcast")
 
-    path = config.reading_list_path
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if not url or "podcasts.apple.com" not in url:
+        logger.warning(f"Podcast URL not an Apple Podcasts link: {url}")
+        return
 
-    if path.exists():
-        existing = path.read_text()
-        if url in existing:
-            logger.info(f"Podcast already bookmarked: {url}")
-            return
-        path.write_text(existing + f"\n## 🎙 {name}\n\n{url}\n")
-    else:
-        path.write_text(f"# Reading List\n\n## 🎙 {name}\n\n{url}\n")
-    logger.info(f"Bookmarked podcast: {name}")
+    if not PODCAST_BOOKMARK_BIN.exists():
+        logger.error(f"podcast-bookmark binary not found at {PODCAST_BOOKMARK_BIN}")
+        return
+
+    result = subprocess.run(
+        [str(PODCAST_BOOKMARK_BIN), url],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode != 0:
+        logger.error(f"podcast-bookmark failed: {result.stderr.strip()}")
+        return
+
+    logger.info(f"Podcast bookmark result for {name}: {result.stdout.strip()}")
 
 
 def action_config_update(classification: Classification, config: Config):
