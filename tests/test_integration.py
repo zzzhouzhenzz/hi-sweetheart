@@ -286,6 +286,19 @@ class TestClassifierParseIntegration:
         assert result.type == "bookmark"
         assert mock_run.called
 
+    def test_json_with_trailing_text(self):
+        """Claude sometimes returns valid JSON followed by extra text."""
+        raw = '{"type": "config_update", "confidence": 0.95, "summary": "6 settings", "action_detail": {"settings": {}}}Some trailing explanation text here'
+        result = _parse_response(raw, "https://example.com")
+        assert result.type == "config_update"
+        assert result.confidence == 0.95
+
+    def test_json_wrapped_in_code_fences_with_trailing(self):
+        """Code fences + trailing text after closing fence."""
+        raw = '```json\n{"type": "podcast", "confidence": 0.8, "summary": "A podcast", "action_detail": {"podcast_url": "https://x.com", "podcast_name": "Test"}}\n```\nHere is some extra explanation.'
+        result = _parse_response(raw, "https://example.com")
+        assert result.type == "podcast"
+
     @patch("hi_sweetheart.classifier.subprocess.run")
     @patch("hi_sweetheart.classifier.time.sleep")
     def test_classify_retries_on_failure(self, mock_sleep, mock_run):

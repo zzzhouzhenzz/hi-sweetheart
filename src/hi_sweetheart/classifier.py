@@ -186,12 +186,37 @@ def _strip_code_fences(text: str) -> str:
     return text.strip()
 
 
+def _extract_first_json(text: str) -> dict | None:
+    """Extract the first valid JSON object from text that may have trailing content."""
+    # Find the first '{' and try progressively larger slices
+    start = text.find("{")
+    if start == -1:
+        return None
+    # Walk backwards from the end, finding each '}' to try parsing
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(text[start:i + 1])
+                except json.JSONDecodeError:
+                    continue
+    return None
+
+
 def _parse_response(raw: str, url: str) -> Classification:
+    cleaned = _strip_code_fences(raw)
     try:
-        data = json.loads(_strip_code_fences(raw))
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse classifier response: {e}")
-        return Classification(type="note", confidence=0.0, summary=f"Unparseable response for: {url}")
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        # Try extracting first JSON object (handles trailing text, extra data)
+        data = _extract_first_json(cleaned)
+        if data is None:
+            logger.error(f"Failed to parse classifier response for {url}: {raw[:200]}")
+            return Classification(type="note", confidence=0.0, summary=f"Unparseable response for: {url}")
 
     classification = Classification(
         type=data.get("type", "note"),
