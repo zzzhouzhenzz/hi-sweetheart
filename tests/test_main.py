@@ -55,8 +55,8 @@ async def test_run_pipeline_processes_messages(tmp_path):
         success=True, text="An article about prompt engineering", url="https://example.com/article",
     ))
     mock_classify = AsyncMock(return_value=MagicMock(
-        type="bookmark", confidence=0.9, summary="Prompt engineering article",
-        action_detail={"title": "Prompting", "summary": "Guide to prompts"},
+        type="note", confidence=0.9, summary="Prompt engineering article",
+        action_detail={"content": "Guide to prompts"},
     ))
 
     with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
@@ -69,8 +69,8 @@ async def test_run_pipeline_processes_messages(tmp_path):
             db_path=env["db_path"],
         )
 
-    reading_list = (tmp_path / "reading-list.md").read_text()
-    assert "Prompting" in reading_list
+    notes = (tmp_path / "notes.md").read_text()
+    assert "Prompt engineering" in notes
 
     state = json.loads(env["state_path"].read_text())
     assert state["last_message_rowid"] == 1
@@ -143,37 +143,33 @@ async def test_run_pipeline_fetch_failure_creates_note(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_full_pipeline_tiered_mode(tmp_path):
-    """Integration test: tiered mode queues risky action, executes safe one."""
+async def test_full_pipeline_multiple_messages(tmp_path):
+    """Integration test: multiple messages all create notes."""
     env = _setup_environment(tmp_path)
     conn = sqlite3.connect(str(env["db_path"]))
-    conn.execute("INSERT INTO message (ROWID, text, handle_id, date, is_from_me) VALUES (2, 'try this plugin https://github.com/foo/bar', 1, 0, 0)")
+    conn.execute("INSERT INTO message (ROWID, text, handle_id, date, is_from_me) VALUES (2, 'check this repo https://github.com/foo/bar', 1, 0, 0)")
     conn.execute("INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 2)")
     conn.commit()
     conn.close()
 
     call_count = 0
 
-    async def mock_classify(message_text, fetched_content, url, images=None):
+    async def mock_classify(message_text, fetched_content, url):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
             return MagicMock(
-                type="bookmark", confidence=0.9, summary="Article",
-                action_detail={"title": "Article", "summary": "Good read"},
+                type="note", confidence=0.9, summary="Article about AI",
+                action_detail={"content": "Good article about AI trends"},
             )
         return MagicMock(
-            type="plugin_install", confidence=0.9, summary="Cool plugin",
-            action_detail={"repo_url": "https://github.com/foo/bar", "install_steps": ["echo test"]},
+            type="note", confidence=0.9, summary="Cool repo",
+            action_detail={"content": "A useful GitHub repository"},
         )
 
     mock_fetch = AsyncMock(return_value=MagicMock(
         success=True, text="Some content", url="https://example.com",
     ))
-
-    config_data = json.loads(env["config_path"].read_text())
-    config_data["mode"] = "tiered"
-    env["config_path"].write_text(json.dumps(config_data))
 
     with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
          patch("hi_sweetheart.main.classify", mock_classify), \
@@ -185,8 +181,9 @@ async def test_full_pipeline_tiered_mode(tmp_path):
             db_path=env["db_path"],
         )
 
-    assert (tmp_path / "reading-list.md").exists()
+    notes = (tmp_path / "notes.md").read_text()
+    assert "Article about AI" in notes
+    assert "Cool repo" in notes
 
-    pending = json.loads((tmp_path / "pending.json").read_text())
-    assert len(pending) == 1
-    assert pending[0]["classification"]["type"] == "plugin_install"
+    state = json.loads(env["state_path"].read_text())
+    assert state["last_message_rowid"] == 2

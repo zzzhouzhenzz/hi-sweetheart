@@ -6,10 +6,6 @@ from hi_sweetheart.classifier import classify, Classification, ClassifyAPIError,
 
 
 def test_classification_types():
-    assert "plugin_install" in CLASSIFICATION_TYPES
-    assert "marketplace_install" in CLASSIFICATION_TYPES
-    assert "config_update" in CLASSIFICATION_TYPES
-    assert "bookmark" in CLASSIFICATION_TYPES
     assert "podcast" in CLASSIFICATION_TYPES
     assert "note" in CLASSIFICATION_TYPES
     assert "ignore" in CLASSIFICATION_TYPES
@@ -20,12 +16,11 @@ async def test_classify_returns_structured_result():
     mock_result = MagicMock()
     mock_result.returncode = 0
     mock_result.stdout = json.dumps({
-        "type": "bookmark",
+        "type": "note",
         "confidence": 0.9,
         "summary": "Article about prompt engineering",
         "action_detail": {
-            "title": "Prompt Engineering Guide",
-            "summary": "Comprehensive guide to prompting",
+            "content": "Comprehensive guide to prompting techniques",
         },
     })
 
@@ -36,7 +31,7 @@ async def test_classify_returns_structured_result():
             url="https://example.com/prompting",
         )
         assert isinstance(result, Classification)
-        assert result.type == "bookmark"
+        assert result.type == "note"
         assert result.confidence == 0.9
 
 
@@ -45,9 +40,9 @@ async def test_classify_low_confidence_becomes_note():
     mock_result = MagicMock()
     mock_result.returncode = 0
     mock_result.stdout = json.dumps({
-        "type": "plugin_install",
+        "type": "podcast",
         "confidence": 0.3,
-        "summary": "Maybe a plugin?",
+        "summary": "Maybe a podcast?",
         "action_detail": {},
     })
 

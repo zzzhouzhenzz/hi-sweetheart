@@ -4,7 +4,6 @@ import asyncio
 import base64
 import logging
 import re
-import subprocess
 from dataclasses import dataclass
 
 import httpx
@@ -51,7 +50,6 @@ class FetchResult:
     success: bool
     text: str = ""
     error: str = ""
-    images: list[bytes] | None = None  # raw image bytes for vision classification
 
 
 async def fetch_content(url: str, message_text: str = "") -> FetchResult:
@@ -71,21 +69,6 @@ async def fetch_content(url: str, message_text: str = "") -> FetchResult:
             curl_result = await _fetch_with_curl(url)
             if curl_result.success and _has_useful_content(curl_result.text):
                 return curl_result
-
-            # Text content is garbage — try extracting og:image for vision classification
-            raw_html = await _fetch_raw_html(url)
-            if raw_html:
-                image_urls = _extract_og_images(raw_html)
-                if image_urls:
-                    images = await _download_images(image_urls)
-                    if images:
-                        og_meta = _extract_og_meta(raw_html)
-                        logger.info(f"Downloaded {len(images)} images from {url}")
-                        return FetchResult(
-                            url=url, success=True,
-                            text=og_meta or message_text,
-                            images=images,
-                        )
 
         # All methods failed — fall back to message text as content
         if message_text:
@@ -175,74 +158,3 @@ async def _fetch_html(url: str) -> FetchResult:
         return FetchResult(url=url, success=True, text=text)
 
 
-async def _fetch_raw_html(url: str) -> str | None:
-    """Fetch raw HTML via curl (for parsing og:image, not text content)."""
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "curl", "-sL",
-            "-A", BROWSER_UA,
-            "--max-time", "10",
-            "--max-redirs", "5",
-            url,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await proc.communicate()
-        if proc.returncode == 0:
-            return stdout.decode("utf-8", errors="replace")
-    except Exception as e:
-        logger.warning(f"Failed to fetch raw HTML for {url}: {e}")
-    return None
-
-
-def _find_og_meta(soup: BeautifulSoup, og_prop: str) -> list[str]:
-    """Find og: meta tags by either property= or name= attribute."""
-    values = []
-    for meta in soup.find_all("meta"):
-        attr_val = meta.get("property", "") or meta.get("name", "")
-        if attr_val == og_prop:
-            content = meta.get("content", "")
-            if content:
-                values.append(content)
-    return values
-
-
-def _extract_og_images(html: str) -> list[str]:
-    """Extract og:image URLs from HTML meta tags."""
-    soup = BeautifulSoup(html, "html.parser")
-    return _find_og_meta(soup, "og:image")
-
-
-def _extract_og_meta(html: str) -> str:
-    """Extract og:title + og:description as text context."""
-    soup = BeautifulSoup(html, "html.parser")
-    parts = []
-    for prop in ("og:title", "og:description"):
-        values = _find_og_meta(soup, prop)
-        if values:
-            parts.append(values[0])
-    return "\n".join(parts) if parts else ""
-
-
-async def _download_images(urls: list[str], max_images: int = 5) -> list[bytes]:
-    """Download images concurrently using curl. Returns list of raw bytes."""
-    async def _download_one(url: str) -> bytes | None:
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "curl", "-sL",
-                "-A", BROWSER_UA,
-                "--max-time", "10",
-                url,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await proc.communicate()
-            if proc.returncode == 0 and len(stdout) > 1000:  # skip tiny/broken images
-                return stdout
-        except Exception as e:
-            logger.warning(f"Failed to download image {url}: {e}")
-        return None
-
-    tasks = [_download_one(url) for url in urls[:max_images]]
-    results = await asyncio.gather(*tasks)
-    return [img for img in results if img is not None]

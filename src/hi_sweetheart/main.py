@@ -6,12 +6,7 @@ import logging
 import sys
 from pathlib import Path
 
-from hi_sweetheart.actions import (
-    execute_action,
-    load_pending,
-    approve_action,
-    reject_action,
-)
+from hi_sweetheart.actions import execute_action
 from hi_sweetheart.classifier import classify, Classification, ClassifyAPIError
 from hi_sweetheart.config import ConfigError, load_config
 from hi_sweetheart.fetcher import extract_urls, fetch_content, has_actionable_content
@@ -104,7 +99,6 @@ async def run_pipeline(
                         message_text=msg.text,
                         fetched_content=fetch_result.text,
                         url=url,
-                        images=fetch_result.images,
                     )
                     log.info(f"Classified as: {classification.type} ({classification.confidence})")
 
@@ -163,29 +157,6 @@ def cmd_run(args):
     ))
 
 
-def cmd_pending(args):
-    config = load_config(Path(args.config))
-    pending = load_pending(config)
-    if not pending:
-        print("No pending actions.")
-        return
-    for p in pending:
-        c = p["classification"]
-        print(f"  [{p['id']}] {c['type']} — {c['summary']} (confidence: {c['confidence']})")
-
-
-def cmd_approve(args):
-    config = load_config(Path(args.config))
-    approve_action(args.id, config)
-    print(f"Approved and executed: {args.id}")
-
-
-def cmd_reject(args):
-    config = load_config(Path(args.config))
-    reject_action(args.id, config)
-    print(f"Rejected: {args.id}")
-
-
 def cmd_log(args):
     config = load_config(Path(args.config))
     if not config.log_path.exists():
@@ -207,17 +178,6 @@ def main():
     run_parser.add_argument("--mode", choices=["auto", "tiered", "propose"], help="Override execution mode")
     run_parser.add_argument("--dry-run", action="store_true", help="Run full pipeline with zero side effects (no writes, no state advance, no notifications)")
     run_parser.set_defaults(func=cmd_run)
-
-    pending_parser = subparsers.add_parser("pending", help="List pending actions")
-    pending_parser.set_defaults(func=cmd_pending)
-
-    approve_parser = subparsers.add_parser("approve", help="Approve a pending action")
-    approve_parser.add_argument("id", help="Action ID to approve")
-    approve_parser.set_defaults(func=cmd_approve)
-
-    reject_parser = subparsers.add_parser("reject", help="Reject a pending action")
-    reject_parser.add_argument("id", help="Action ID to reject")
-    reject_parser.set_defaults(func=cmd_reject)
 
     log_parser = subparsers.add_parser("log", help="Show recent run history")
     log_parser.set_defaults(func=cmd_log)
