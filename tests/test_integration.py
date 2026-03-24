@@ -22,7 +22,7 @@ from hi_sweetheart.state import State
 from hi_sweetheart.config import Config, load_config
 from hi_sweetheart.reader import read_messages, _datetime_to_imessage_ns, IMESSAGE_EPOCH
 from hi_sweetheart.fetcher import extract_urls, has_actionable_content
-from hi_sweetheart.classifier import Classification, _parse_response, classify, ClassifyAPIError
+from hi_sweetheart.classifier import Classification, ClassifyInput, _parse_response, classify_batch, ClassifyAPIError
 from hi_sweetheart.actions import (
     execute_action, action_bookmark, action_note, action_config_update,
     queue_pending, load_pending, approve_action, reject_action,
@@ -264,7 +264,7 @@ class TestClassifierParseIntegration:
         assert result.confidence == 0.0
 
     @patch("hi_sweetheart.classifier.subprocess.run")
-    def test_classify_calls_claude_and_parses(self, mock_run):
+    def test_classify_batch_calls_claude_and_parses(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout=json.dumps({
@@ -275,12 +275,10 @@ class TestClassifierParseIntegration:
             }),
         )
         import asyncio
-        result = asyncio.run(classify(
-            message_text="check this",
-            fetched_content="content here",
-            url="https://example.com",
-        ))
-        assert result.type == "bookmark"
+        results = asyncio.run(classify_batch([
+            ClassifyInput(url="https://example.com", message_text="check this", fetched_content="content here"),
+        ]))
+        assert results[0].type == "bookmark"
         assert mock_run.called
 
     def test_json_with_trailing_text(self):
@@ -298,7 +296,7 @@ class TestClassifierParseIntegration:
 
     @patch("hi_sweetheart.classifier.subprocess.run")
     @patch("hi_sweetheart.classifier.time.sleep")
-    def test_classify_retries_on_failure(self, mock_sleep, mock_run):
+    def test_classify_batch_retries_on_failure(self, mock_sleep, mock_run):
         mock_run.side_effect = [
             MagicMock(returncode=1, stderr="timeout"),
             MagicMock(returncode=1, stderr="timeout"),
@@ -306,11 +304,9 @@ class TestClassifierParseIntegration:
         ]
         import asyncio
         with pytest.raises(ClassifyAPIError):
-            asyncio.run(classify(
-                message_text="test",
-                fetched_content="content",
-                url="https://example.com",
-            ))
+            asyncio.run(classify_batch([
+                ClassifyInput(url="https://example.com", message_text="test", fetched_content="content"),
+            ]))
         assert mock_run.call_count == 3
 
 
@@ -473,7 +469,7 @@ class TestReaderClassifierActionsIntegration:
         urls = extract_urls(msgs[0].text)
         assert urls == ["https://example.com/cool-article"]
 
-        # Step 3: classify (mock claude -p)
+        # Step 3: classify via batch (mock claude -p)
         mock_claude.return_value = MagicMock(
             returncode=0,
             stdout=json.dumps({
@@ -484,15 +480,13 @@ class TestReaderClassifierActionsIntegration:
             }),
         )
         import asyncio
-        classification = asyncio.run(classify(
-            message_text=msgs[0].text,
-            fetched_content="fetched page content",
-            url=urls[0],
-        ))
-        assert classification.type == "bookmark"
+        results = asyncio.run(classify_batch([
+            ClassifyInput(url=urls[0], message_text=msgs[0].text, fetched_content="fetched page content"),
+        ]))
+        assert results[0].type == "bookmark"
 
         # Step 4: execute action
-        result = execute_action(classification, config)
+        result = execute_action(results[0], config)
         assert "Executed" in result
         assert "Cool Article" in config.reading_list_path.read_text()
 
@@ -518,15 +512,13 @@ class TestReaderClassifierActionsIntegration:
         )
 
         import asyncio
-        classification = asyncio.run(classify(
-            message_text=msgs[0].text,
-            fetched_content="ambiguous content",
-            url=urls[0],
-        ))
+        results = asyncio.run(classify_batch([
+            ClassifyInput(url=urls[0], message_text=msgs[0].text, fetched_content="ambiguous content"),
+        ]))
         # Downgraded to note due to low confidence
-        assert classification.type == "note"
+        assert results[0].type == "note"
 
-        result = execute_action(classification, config)
+        result = execute_action(results[0], config)
         assert "Executed" in result
         assert config.notes_path.exists()
 
@@ -595,6 +587,13 @@ def _setup_pipeline_env(tmp_path, sender="+15551234567"):
     return config_path, state_path, db_path
 
 
+def _mock_classify_batch(classification):
+    """Create a mock for classify_batch that returns the same classification for each input."""
+    async def mock_fn(inputs):
+        return [classification] * len(inputs)
+    return AsyncMock(side_effect=mock_fn)
+
+
 class TestDryRunIntegration:
     """Dry-run mode runs the full pipeline but writes nothing."""
 
@@ -605,13 +604,13 @@ class TestDryRunIntegration:
         mock_fetch = AsyncMock(return_value=MagicMock(
             success=True, text="Article about AI tools", url="https://example.com/article",
         ))
-        mock_classify = AsyncMock(return_value=MagicMock(
+        classification = Classification(
             type="bookmark", confidence=0.9, summary="AI tools article",
             action_detail={"title": "AI Tools", "summary": "Great resource"},
-        ))
+        )
 
         with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
-             patch("hi_sweetheart.main.classify", mock_classify), \
+             patch("hi_sweetheart.main.classify_batch", _mock_classify_batch(classification)), \
              patch("hi_sweetheart.main.send_notification") as mock_notify:
 
             await run_pipeline(
@@ -633,13 +632,13 @@ class TestDryRunIntegration:
         mock_fetch = AsyncMock(return_value=MagicMock(
             success=True, text="content", url="https://example.com/article",
         ))
-        mock_classify = AsyncMock(return_value=MagicMock(
+        classification = Classification(
             type="bookmark", confidence=0.9, summary="Bookmark",
             action_detail={"title": "Title", "summary": "Summary"},
-        ))
+        )
 
         with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
-             patch("hi_sweetheart.main.classify", mock_classify), \
+             patch("hi_sweetheart.main.classify_batch", _mock_classify_batch(classification)), \
              patch("hi_sweetheart.main.send_notification"):
 
             await run_pipeline(
@@ -655,19 +654,20 @@ class TestDryRunIntegration:
 
     @pytest.mark.asyncio
     async def test_dry_run_still_classifies(self, tmp_path):
-        """Dry run should still call classify — it's read-only."""
+        """Dry run should still call classify_batch — it's read-only."""
         config_path, state_path, db_path = _setup_pipeline_env(tmp_path)
 
         mock_fetch = AsyncMock(return_value=MagicMock(
             success=True, text="content", url="https://example.com/article",
         ))
-        mock_classify = AsyncMock(return_value=MagicMock(
+        classification = Classification(
             type="note", confidence=0.8, summary="A note",
             action_detail={"content": "info"},
-        ))
+        )
+        mock_batch = _mock_classify_batch(classification)
 
         with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
-             patch("hi_sweetheart.main.classify", mock_classify), \
+             patch("hi_sweetheart.main.classify_batch", mock_batch), \
              patch("hi_sweetheart.main.send_notification"):
 
             await run_pipeline(
@@ -677,8 +677,9 @@ class TestDryRunIntegration:
                 dry_run=True,
             )
 
-        # Classify was called for each message's URL
-        assert mock_classify.call_count == 2
+        # classify_batch called once with all 2 URLs batched together
+        mock_batch.assert_called_once()
+        assert len(mock_batch.call_args[0][0]) == 2
 
     @pytest.mark.asyncio
     async def test_dry_run_fetch_failure_no_note_written(self, tmp_path):
@@ -711,13 +712,13 @@ class TestDryRunIntegration:
         mock_fetch = AsyncMock(return_value=MagicMock(
             success=True, text="content", url="https://example.com/article",
         ))
-        mock_classify = AsyncMock(return_value=MagicMock(
+        classification = Classification(
             type="bookmark", confidence=0.9, summary="Cool article",
             action_detail={"title": "Cool", "summary": "Article"},
-        ))
+        )
 
         with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
-             patch("hi_sweetheart.main.classify", mock_classify), \
+             patch("hi_sweetheart.main.classify_batch", _mock_classify_batch(classification)), \
              patch("hi_sweetheart.main.send_notification"):
 
             await run_pipeline(
@@ -739,13 +740,13 @@ class TestDryRunIntegration:
         mock_fetch = AsyncMock(return_value=MagicMock(
             success=True, text="content", url="https://example.com/article",
         ))
-        mock_classify = AsyncMock(return_value=MagicMock(
+        classification = Classification(
             type="bookmark", confidence=0.9, summary="Article",
             action_detail={"title": "Article", "summary": "Content"},
-        ))
+        )
 
         with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
-             patch("hi_sweetheart.main.classify", mock_classify), \
+             patch("hi_sweetheart.main.classify_batch", _mock_classify_batch(classification)), \
              patch("hi_sweetheart.main.send_notification"):
 
             await run_pipeline(

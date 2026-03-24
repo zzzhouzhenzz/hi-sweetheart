@@ -5,9 +5,16 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch, AsyncMock, MagicMock
 from hi_sweetheart.main import run_pipeline, cmd_reset
-from hi_sweetheart.classifier import ClassifyAPIError
+from hi_sweetheart.classifier import Classification, ClassifyAPIError
 from hi_sweetheart.items import read_items, add_item, make_item
 from hi_sweetheart.reader import _datetime_to_imessage_ns
+
+
+def _mock_classify_batch(classification):
+    """Create a mock for classify_batch that returns the same classification for each input."""
+    async def mock_fn(inputs):
+        return [classification] * len(inputs)
+    return AsyncMock(side_effect=mock_fn)
 
 
 def _setup_environment(tmp_path) -> dict:
@@ -57,13 +64,13 @@ async def test_run_pipeline_processes_messages(tmp_path):
     mock_fetch = AsyncMock(return_value=MagicMock(
         success=True, text="An article about prompt engineering", url="https://example.com/article",
     ))
-    mock_classify = AsyncMock(return_value=MagicMock(
+    classification = Classification(
         type="bookmark", confidence=0.9, summary="Prompt engineering article",
         action_detail={"title": "Prompting Guide", "summary": "Guide to prompts"},
-    ))
+    )
 
     with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
-         patch("hi_sweetheart.main.classify", mock_classify), \
+         patch("hi_sweetheart.main.classify_batch", _mock_classify_batch(classification)), \
          patch("hi_sweetheart.main.send_notification"):
 
         await run_pipeline(
@@ -109,7 +116,7 @@ async def test_run_pipeline_api_error_aborts_without_advancing(tmp_path):
     ))
 
     with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
-         patch("hi_sweetheart.main.classify", AsyncMock(side_effect=ClassifyAPIError("API down"))), \
+         patch("hi_sweetheart.main.classify_batch", AsyncMock(side_effect=ClassifyAPIError("API down"))), \
          patch("hi_sweetheart.main.send_notification"):
 
         await run_pipeline(
@@ -211,13 +218,13 @@ async def test_run_pipeline_ignore_not_added(tmp_path):
     mock_fetch = AsyncMock(return_value=MagicMock(
         success=True, text="Some irrelevant content",
     ))
-    mock_classify = AsyncMock(return_value=MagicMock(
+    classification = Classification(
         type="ignore", confidence=0.9, summary="Not relevant",
         action_detail={},
-    ))
+    )
 
     with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
-         patch("hi_sweetheart.main.classify", mock_classify), \
+         patch("hi_sweetheart.main.classify_batch", _mock_classify_batch(classification)), \
          patch("hi_sweetheart.main.send_notification"):
 
         await run_pipeline(
@@ -238,13 +245,13 @@ async def test_run_pipeline_plugin_stays_pending(tmp_path):
     mock_fetch = AsyncMock(return_value=MagicMock(
         success=True, text="A Claude Code plugin repo",
     ))
-    mock_classify = AsyncMock(return_value=MagicMock(
+    classification = Classification(
         type="plugin_install", confidence=0.9, summary="Cool plugin",
         action_detail={"plugin_name": "engram", "repo_url": "https://github.com/foo/engram"},
-    ))
+    )
 
     with patch("hi_sweetheart.main.fetch_content", mock_fetch), \
-         patch("hi_sweetheart.main.classify", mock_classify), \
+         patch("hi_sweetheart.main.classify_batch", _mock_classify_batch(classification)), \
          patch("hi_sweetheart.main.send_notification"):
 
         await run_pipeline(

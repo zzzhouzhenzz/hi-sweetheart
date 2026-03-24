@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from hi_sweetheart.actions import action_podcast
-from hi_sweetheart.classifier import classify, Classification, ClassifyAPIError
+from hi_sweetheart.classifier import classify_batch, ClassifyInput, Classification, ClassifyAPIError
 from hi_sweetheart.config import ConfigError, load_config
 from hi_sweetheart.fetcher import extract_urls, fetch_content
 from hi_sweetheart.items import add_item, make_item
@@ -67,77 +67,87 @@ async def run_pipeline(
     max_rowid = messages[0].rowid
     api_failed = False
 
+    # Phase 1: Handle podcasts directly, fetch content for other URLs
+    classify_inputs: list[ClassifyInput] = []
+
     for msg in messages:
         log.info(f"Processing message {msg.rowid}: {msg.text[:80]}...")
-        try:
-            urls = extract_urls(msg.text)
+        urls = extract_urls(msg.text)
 
-            if not urls:
-                log.info(f"Message {msg.rowid}: no URLs, skipping")
-                continue
+        if not urls:
+            log.info(f"Message {msg.rowid}: no URLs, skipping")
+            continue
 
-            for url in urls:
-                if "podcasts.apple.com" in url:
-                    log.info(f"Podcast URL detected: {url}")
-                    if not dry_run:
-                        action_podcast(
-                            Classification(
-                                type="podcast", confidence=1.0,
-                                summary=f"Apple Podcast",
-                                action_detail={"podcast_url": url, "podcast_name": "(from iMessage)"},
-                            ),
-                            config,
-                        )
-                        item = make_item("podcast", "Podcast Episode", url, "Saved to Apple Podcasts")
-                        add_item(items_path, item)
-                    else:
-                        log.info(f"[DRY RUN] Would save podcast: {url}")
-                    summary.add("podcast", f"Podcast: {url}")
-                    continue
-
-                log.info(f"Fetching: {url}")
-                fetch_result = await fetch_content(url, message_text=msg.text)
-
-                if not fetch_result.success:
-                    log.warning(f"Fetch failed for {url}: {fetch_result.error}")
-                    if not dry_run:
-                        item = make_item("note", "Fetch failed", url, fetch_result.error)
-                        add_item(items_path, item)
-                    summary.add_error(f"Fetch failed: {url}")
-                    continue
-
-                log.info(f"Classifying content from {url}")
-                classification = await classify(
-                    message_text=msg.text,
-                    fetched_content=fetch_result.text,
-                    url=url,
-                )
-                log.info(f"Classified as: {classification.type} ({classification.confidence})")
-
-                if classification.type == "ignore":
-                    summary.add("ignore", f"Ignored: {url}")
-                    continue
-
-                title = _extract_title(classification)
+        for url in urls:
+            if "podcasts.apple.com" in url:
+                log.info(f"Podcast URL detected: {url}")
                 if not dry_run:
-                    item = make_item(classification.type, title, url, classification.summary)
+                    action_podcast(
+                        Classification(
+                            type="podcast", confidence=1.0,
+                            summary=f"Apple Podcast",
+                            action_detail={"podcast_url": url, "podcast_name": "(from iMessage)"},
+                        ),
+                        config,
+                    )
+                    item = make_item("podcast", "Podcast Episode", url, "Saved to Apple Podcasts")
                     add_item(items_path, item)
                 else:
-                    log.info(f"[DRY RUN] Would add: {classification.type} — {title}")
-                summary.add(classification.type, f"{title}: {url}")
+                    log.info(f"[DRY RUN] Would save podcast: {url}")
+                summary.add("podcast", f"Podcast: {url}")
+                continue
 
+            log.info(f"Fetching: {url}")
+            try:
+                fetch_result = await fetch_content(url, message_text=msg.text)
+            except Exception as e:
+                log.error(f"Fetch error for {url}: {e}")
+                if not dry_run:
+                    item = make_item("note", "Fetch failed", url, str(e))
+                    add_item(items_path, item)
+                summary.add_error(f"Fetch failed: {url}")
+                continue
+
+            if not fetch_result.success:
+                log.warning(f"Fetch failed for {url}: {fetch_result.error}")
+                if not dry_run:
+                    item = make_item("note", "Fetch failed", url, fetch_result.error)
+                    add_item(items_path, item)
+                summary.add_error(f"Fetch failed: {url}")
+                continue
+
+            classify_inputs.append(ClassifyInput(
+                url=url,
+                message_text=msg.text,
+                fetched_content=fetch_result.text,
+            ))
+
+    # Phase 2: Batch classify all fetched content
+    if classify_inputs:
+        log.info(f"Classifying {len(classify_inputs)} URLs in batch")
+        try:
+            classifications = await classify_batch(classify_inputs)
         except ClassifyAPIError as e:
-            log.error(f"Claude API exhausted retries at message {msg.rowid}: {e}")
+            log.error(f"Claude API batch classification failed: {e}")
             summary.add_error(f"API failure, aborting: {e}")
             api_failed = True
-            break
+            classifications = []
 
-        except Exception as e:
-            log.error(f"Failed to process message {msg.rowid}: {e}")
-            summary.add_error(f"Message {msg.rowid}: {e}")
+        # Phase 3: Process classification results
+        for inp, classification in zip(classify_inputs, classifications):
+            log.info(f"Classified {inp.url} as: {classification.type} ({classification.confidence})")
+
+            if classification.type == "ignore":
+                summary.add("ignore", f"Ignored: {inp.url}")
+                continue
+
+            title = _extract_title(classification)
             if not dry_run:
-                item = make_item("note", "Processing failed", "", str(e))
+                item = make_item(classification.type, title, inp.url, classification.summary)
                 add_item(items_path, item)
+            else:
+                log.info(f"[DRY RUN] Would add: {classification.type} — {title}")
+            summary.add(classification.type, f"{title}: {inp.url}")
 
     if not dry_run and not api_failed:
         state.update(max_rowid)
