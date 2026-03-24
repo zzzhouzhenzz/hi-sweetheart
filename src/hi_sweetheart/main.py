@@ -74,6 +74,10 @@ async def run_pipeline(
             send_notification("hi-sweetheart", summary.format())
         return
 
+    # Messages are newest-first; record the max rowid to save at end
+    max_rowid = messages[0].rowid
+    api_failed = False
+
     for msg in messages:
         log.info(f"Processing message {msg.rowid}: {msg.text[:80]}...")
         try:
@@ -81,9 +85,6 @@ async def run_pipeline(
 
             if not urls and not has_actionable_content(msg.text):
                 log.info(f"Message {msg.rowid}: no URLs or actionable content, skipping")
-                if not dry_run:
-                    state.update(msg.rowid)
-                    state.save()
                 continue
 
             if urls:
@@ -152,14 +153,11 @@ async def run_pipeline(
                     log.info(result)
                 summary.add(classification.type, result)
 
-            if not dry_run:
-                state.update(msg.rowid)
-                state.save()
-
         except ClassifyAPIError as e:
             # API failed after retries — abort run, don't advance ROWID
             log.error(f"Claude API exhausted retries at message {msg.rowid}: {e}")
             summary.add_error(f"API failure, aborting: {e}")
+            api_failed = True
             break
 
         except Exception as e:
@@ -173,8 +171,11 @@ async def run_pipeline(
                     action_detail={"content": f"Action failed: {e}\n\nOriginal message: {msg.text[:500]}"},
                 )
                 execute_action(fallback_note, config)
-                state.update(msg.rowid)
-                state.save()
+
+    # Save state: advance to max rowid seen (newest message)
+    if not dry_run and not api_failed:
+        state.update(max_rowid)
+        state.save()
 
     log.info("=== Run complete ===")
     notification_text = summary.format()

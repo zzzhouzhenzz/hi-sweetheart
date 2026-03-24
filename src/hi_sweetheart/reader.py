@@ -75,7 +75,7 @@ def read_messages(
             query += "  AND m.date > ?\n"
             params.append(cutoff)
 
-        query += "ORDER BY m.ROWID ASC"
+        query += "ORDER BY m.ROWID DESC"
 
         cursor = conn.execute(query, params)
 

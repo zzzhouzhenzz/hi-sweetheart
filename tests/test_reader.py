@@ -40,8 +40,8 @@ def test_read_messages_returns_new(tmp_path):
     ])
     messages = read_messages(db, sender="+15551234567", after_rowid=1)
     assert len(messages) == 2
-    assert messages[0].rowid == 2
-    assert messages[1].rowid == 3
+    assert messages[0].rowid == 3  # newest first
+    assert messages[1].rowid == 2
 
 
 def test_read_messages_empty_when_no_new(tmp_path):

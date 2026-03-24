@@ -130,8 +130,8 @@ class TestReaderStateIntegration:
         # Simulate: state says we've seen up to rowid 1
         msgs = read_messages(db_path, sender=sender, after_rowid=1)
         assert len(msgs) == 2
-        assert msgs[0].text == "new message"
-        assert msgs[1].text == "newest message"
+        assert msgs[0].text == "newest message"  # newest first
+        assert msgs[1].text == "new message"
 
     def test_reader_first_run_3day_filter(self, tmp_path):
         sender = "+15551234567"
