@@ -45,7 +45,7 @@ async def run_pipeline(
     state = State(state_path)
     summary = RunSummary()
 
-    first_run = not state_path.exists()
+    first_run = state.last_message_rowid == 0
 
     try:
         messages = read_messages(

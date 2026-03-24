@@ -1,10 +1,12 @@
 import json
 import sqlite3
 import pytest
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch, AsyncMock, MagicMock
 from hi_sweetheart.main import run_pipeline
 from hi_sweetheart.classifier import ClassifyAPIError
+from hi_sweetheart.reader import _datetime_to_imessage_ns
 
 
 def _setup_environment(tmp_path) -> dict:
@@ -22,8 +24,11 @@ def _setup_environment(tmp_path) -> dict:
     }))
 
     state_path = tmp_path / "state.json"
-    # Pre-create state so first_run=False (avoids 3-day date filter on test data)
+    # rowid=0 means first run — only loads last 3 days of messages
     state_path.write_text(json.dumps({"last_message_rowid": 0, "last_run": None}))
+
+    # Use a recent timestamp so messages pass the 3-day first_run filter
+    recent_date = _datetime_to_imessage_ns(datetime.now(timezone.utc) - timedelta(hours=1))
 
     db_path = tmp_path / "chat.db"
     conn = sqlite3.connect(str(db_path))
@@ -35,7 +40,7 @@ def _setup_environment(tmp_path) -> dict:
     conn.execute("INSERT INTO handle (ROWID, id) VALUES (1, '+15551234567')")
     conn.execute("INSERT INTO chat (ROWID, chat_identifier) VALUES (1, '+15551234567')")
     conn.execute("INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (1, 1)")
-    conn.execute("INSERT INTO message (ROWID, text, handle_id, date, is_from_me) VALUES (1, 'check this https://example.com/article', 1, 0, 0)")
+    conn.execute("INSERT INTO message (ROWID, text, handle_id, date, is_from_me) VALUES (1, 'check this https://example.com/article', 1, ?, 0)", (recent_date,))
     conn.execute("INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 1)")
     conn.commit()
     conn.close()
@@ -146,8 +151,9 @@ async def test_run_pipeline_fetch_failure_creates_note(tmp_path):
 async def test_full_pipeline_tiered_mode(tmp_path):
     """Integration test: tiered mode queues risky action, executes safe one."""
     env = _setup_environment(tmp_path)
+    recent_date = _datetime_to_imessage_ns(datetime.now(timezone.utc) - timedelta(hours=1))
     conn = sqlite3.connect(str(env["db_path"]))
-    conn.execute("INSERT INTO message (ROWID, text, handle_id, date, is_from_me) VALUES (2, 'try this plugin https://github.com/foo/bar', 1, 0, 0)")
+    conn.execute("INSERT INTO message (ROWID, text, handle_id, date, is_from_me) VALUES (2, 'try this plugin https://github.com/foo/bar', 1, ?, 0)", (recent_date,))
     conn.execute("INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 2)")
     conn.commit()
     conn.close()
