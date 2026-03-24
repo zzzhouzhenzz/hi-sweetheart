@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hi Sweetheart</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #161616;
+    --bg-card: #1c1c1c;
+    --bg-hover: #262626;
+    --border: #303030;
+    --text: #f0f0f0;
+    --text-2: #a0a0a0;
+    --text-3: #606060;
+    --blue: #6ea1ff;
+    --green: #6ec96e;
+    --red: #e06060;
+    --sans: 'IBM Plex Sans', -apple-system, sans-serif;
+    --mono: 'IBM Plex Mono', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .app {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 4rem;
+  }
+
+  header { margin-bottom: 2rem; }
+
+  header h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    margin-bottom: 0.25rem;
+  }
+
+  .stats {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--text-3);
+  }
+  .stats span { color: var(--text-2); }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tab {
+    font-family: var(--sans);
+    font-size: 0.85rem;
+    font-weight: 500;
+    background: none;
+    border: none;
+    color: var(--text-3);
+    padding: 0.6rem 1.2rem;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  .tab:hover { color: var(--text-2); }
+  .tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+
+  /* Item list */
+  .items { list-style: none; }
+
+  .item {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.5rem;
+    border-radius: 8px;
+    transition: background 0.12s;
+  }
+  .item:hover { background: var(--bg-hover); }
+
+  .item-emoji {
+    flex-shrink: 0;
+    font-size: 1.1rem;
+    width: 1.5rem;
+    text-align: center;
+  }
+
+  .item-body {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .item-link {
+    color: var(--text);
+    text-decoration: none;
+    font-size: 0.9rem;
+  }
+  .item-link:hover { color: var(--blue); text-decoration: underline; }
+
+  .item-summary {
+    color: var(--text-3);
+    font-size: 0.8rem;
+    margin-left: 0.4rem;
+  }
+
+  .item-time {
+    flex-shrink: 0;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--text-3);
+  }
+
+  .item--done .item-link { color: var(--text-2); text-decoration: line-through; }
+  .item--done .item-summary { color: var(--text-3); }
+
+  /* Done button */
+  .done-btn {
+    flex-shrink: 0;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-3);
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    padding: 0.2rem 0.5rem;
+    cursor: pointer;
+    transition: all 0.12s;
+    white-space: nowrap;
+  }
+  .done-btn:hover { border-color: var(--green); color: var(--green); }
+  .done-btn.undo { border-color: var(--text-3); }
+  .done-btn.undo:hover { border-color: var(--red); color: var(--red); }
+
+  /* Type group */
+  .type-group { margin-bottom: 1.5rem; }
+
+  .type-label {
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-3);
+    padding: 0 0.25rem;
+    margin-bottom: 0.4rem;
+  }
+
+  .empty {
+    color: var(--text-3);
+    font-size: 0.85rem;
+    padding: 2rem 0.5rem;
+    font-style: italic;
+    text-align: center;
+  }
+
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 0.75rem 0;
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 1.5rem;
+    left: 50%;
+    transform: translateX(-50%) translateY(60px);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-size: 0.8rem;
+    padding: 0.5rem 1.2rem;
+    border-radius: 8px;
+    z-index: 99;
+    transition: transform 0.3s cubic-bezier(0.16,1,0.3,1), opacity 0.3s;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .toast.on { transform: translateX(-50%) translateY(0); opacity: 1; }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header>
+    <h1>Hi Sweetheart</h1>
+    <div class="stats"><span id="s-pending">0</span> pending · <span id="s-done">0</span> done</div>
+  </header>
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('time')">By Time</button>
+    <button class="tab" onclick="switchTab('type')">By Type</button>
+  </div>
+
+  <div id="view"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let items = [];
+let currentTab = 'time';
+
+async function load() {
+  const r = await fetch('/api/items');
+  const data = await r.json();
+  items = data.items;
+  render();
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function renderItem(item, idx) {
+  const done = item.status === 'done';
+  const cls = done ? 'item item--done' : 'item';
+  const btnCls = done ? 'done-btn undo' : 'done-btn';
+  const btnText = done ? 'undo' : 'done';
+  const action = done ? `markUndone(${idx})` : `markDone(${idx})`;
+  return `<li class="${cls}">
+    <span class="item-emoji">${item.emoji}</span>
+    <div class="item-body">
+      <a class="item-link" href="${esc(item.url)}" target="_blank">${esc(item.title)}</a>
+      <span class="item-summary">— ${esc(item.summary)}</span>
+    </div>
+    <span class="item-time">${esc(item.timestamp)}</span>
+    <button class="${btnCls}" onclick="${action}">${btnText}</button>
+  </li>`;
+}
+
+function renderByTime() {
+  const sorted = items.map((it, i) => ({...it, _idx: i}))
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+
+  const pending = sorted.filter(it => it.status === 'pending');
+  const done = sorted.filter(it => it.status === 'done');
+
+  let html = '';
+  if (pending.length) {
+    html += `<ul class="items">${pending.map(it => renderItem(it, it._idx)).join('')}</ul>`;
+  }
+  if (pending.length && done.length) {
+    html += '<hr class="divider">';
+  }
+  if (done.length) {
+    html += `<ul class="items">${done.map(it => renderItem(it, it._idx)).join('')}</ul>`;
+  }
+  if (!items.length) {
+    html = '<div class="empty">No items yet. Run hi-sweetheart to process messages.</div>';
+  }
+  return html;
+}
+
+const TYPE_LABELS = {
+  bookmark: 'Bookmarks',
+  podcast: 'Podcasts',
+  note: 'Notes',
+  plugin_install: 'Plugins',
+  marketplace_install: 'Marketplaces',
+  config_update: 'Config',
+};
+
+function renderByType() {
+  if (!items.length) {
+    return '<div class="empty">No items yet. Run hi-sweetheart to process messages.</div>';
+  }
+
+  const groups = {};
+  items.forEach((it, i) => {
+    const t = it.action_type;
+    if (!groups[t]) groups[t] = [];
+    groups[t].push({...it, _idx: i});
+  });
+
+  let html = '';
+  for (const [type, label] of Object.entries(TYPE_LABELS)) {
+    const group = groups[type];
+    if (!group) continue;
+    group.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    html += `<div class="type-group">
+      <div class="type-label">${label}</div>
+      <ul class="items">${group.map(it => renderItem(it, it._idx)).join('')}</ul>
+    </div>`;
+  }
+  return html;
+}
+
+function render() {
+  const pending = items.filter(it => it.status === 'pending').length;
+  const done = items.filter(it => it.status === 'done').length;
+  document.getElementById('s-pending').textContent = pending;
+  document.getElementById('s-done').textContent = done;
+  document.getElementById('view').innerHTML =
+    currentTab === 'time' ? renderByTime() : renderByType();
+}
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.tab[onclick*="${tab}"]`).classList.add('active');
+  render();
+}
+
+async function markDone(idx) {
+  await fetch('/api/done', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({index: idx}),
+  });
+  toast('Marked done');
+  load();
+}
+
+async function markUndone(idx) {
+  await fetch('/api/undone', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({index: idx}),
+  });
+  toast('Marked pending');
+  load();
+}
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('on');
+  setTimeout(() => el.classList.remove('on'), 1800);
+}
+
+load();
+</script>
+</body>
+</html>

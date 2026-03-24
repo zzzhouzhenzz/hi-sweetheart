@@ -4,18 +4,13 @@ import argparse
 import asyncio
 import logging
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
-from hi_sweetheart.actions import (
-    execute_action,
-    load_pending,
-    approve_action,
-    reject_action,
-)
+from hi_sweetheart.actions import action_podcast
 from hi_sweetheart.classifier import classify, Classification, ClassifyAPIError
 from hi_sweetheart.config import ConfigError, load_config
-from hi_sweetheart.fetcher import extract_urls, fetch_content, has_actionable_content
+from hi_sweetheart.fetcher import extract_urls, fetch_content
+from hi_sweetheart.items import add_item, make_item
 from hi_sweetheart.notify import RunSummary, send_notification, setup_logging
 from hi_sweetheart.reader import IMESSAGE_DB_PATH, read_messages
 from hi_sweetheart.state import State
@@ -37,12 +32,6 @@ async def run_pipeline(
     if mode_override:
         config.mode = mode_override
 
-    # Each run gets its own output file with timestamp suffix
-    run_ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    for attr in ("reading_list_path", "notes_path"):
-        p = getattr(config, attr)
-        setattr(config, attr, p.with_stem(f"{p.stem}-{run_ts}"))
-
     log = setup_logging(config.log_path)
     if dry_run:
         log.info("=== hi-sweetheart DRY RUN started (no side effects) ===")
@@ -51,6 +40,7 @@ async def run_pipeline(
 
     state = State(state_path)
     summary = RunSummary()
+    items_path = config.items_path
 
     first_run = state.last_message_rowid == 0
 
@@ -74,7 +64,6 @@ async def run_pipeline(
             send_notification("hi-sweetheart", summary.format())
         return
 
-    # Messages are newest-first; record the max rowid to save at end
     max_rowid = messages[0].rowid
     api_failed = False
 
@@ -83,96 +72,73 @@ async def run_pipeline(
         try:
             urls = extract_urls(msg.text)
 
-            if not urls and not has_actionable_content(msg.text):
-                log.info(f"Message {msg.rowid}: no URLs or actionable content, skipping")
+            if not urls:
+                log.info(f"Message {msg.rowid}: no URLs, skipping")
                 continue
 
-            if urls:
-                for url in urls:
-                    # Podcast URLs: skip fetch/classify, open directly in Apple Podcasts
-                    if "podcasts.apple.com" in url:
-                        log.info(f"Podcast URL detected: {url}")
-                        podcast = Classification(
-                            type="podcast", confidence=1.0,
-                            summary=f"Apple Podcast: {url}",
-                            action_detail={"podcast_url": url, "podcast_name": "(from iMessage)"},
-                        )
-                        if not dry_run:
-                            result = execute_action(podcast, config)
-                        else:
-                            result = f"[DRY RUN] Would execute: podcast — open in Apple Podcasts: {url}"
-                            log.info(result)
-                        summary.add("podcast", result)
-                        continue
-
-                    log.info(f"Fetching: {url}")
-                    fetch_result = await fetch_content(url, message_text=msg.text)
-
-                    if not fetch_result.success:
-                        # Per spec: fetch failure -> create note with raw URL
-                        log.warning(f"Fetch failed for {url}: {fetch_result.error}")
-                        note = Classification(
-                            type="note", confidence=0.0,
-                            summary=f"Failed to fetch: {url}",
-                            action_detail={"content": f"URL fetch failed ({fetch_result.error}): {url}"},
-                        )
-                        if not dry_run:
-                            execute_action(note, config)
-                        else:
-                            log.info(f"[DRY RUN] Would create note for fetch failure: {url}")
-                        summary.add_error(f"Fetch failed: {url}")
-                        continue
-
-                    log.info(f"Classifying content from {url}")
-                    classification = await classify(
-                        message_text=msg.text,
-                        fetched_content=fetch_result.text,
-                        url=url,
-                    )
-                    log.info(f"Classified as: {classification.type} ({classification.confidence})")
-                    classification.action_detail.setdefault("source_url", url)
-
+            for url in urls:
+                if "podcasts.apple.com" in url:
+                    log.info(f"Podcast URL detected: {url}")
                     if not dry_run:
-                        result = execute_action(classification, config)
+                        action_podcast(
+                            Classification(
+                                type="podcast", confidence=1.0,
+                                summary=f"Apple Podcast",
+                                action_detail={"podcast_url": url, "podcast_name": "(from iMessage)"},
+                            ),
+                            config,
+                        )
+                        item = make_item("podcast", "Podcast Episode", url, "Saved to Apple Podcasts")
+                        add_item(items_path, item)
                     else:
-                        result = f"[DRY RUN] Would execute: {classification.type} — {classification.summary}"
-                        log.info(result)
-                    summary.add(classification.type, result)
-            else:
-                # Actionable text content without URL
-                log.info("Classifying text content directly")
+                        log.info(f"[DRY RUN] Would save podcast: {url}")
+                    summary.add("podcast", f"Podcast: {url}")
+                    continue
+
+                log.info(f"Fetching: {url}")
+                fetch_result = await fetch_content(url, message_text=msg.text)
+
+                if not fetch_result.success:
+                    log.warning(f"Fetch failed for {url}: {fetch_result.error}")
+                    if not dry_run:
+                        item = make_item("note", "Fetch failed", url, fetch_result.error)
+                        add_item(items_path, item)
+                    summary.add_error(f"Fetch failed: {url}")
+                    continue
+
+                log.info(f"Classifying content from {url}")
                 classification = await classify(
                     message_text=msg.text,
-                    fetched_content=msg.text,
-                    url="(no url)",
+                    fetched_content=fetch_result.text,
+                    url=url,
                 )
+                log.info(f"Classified as: {classification.type} ({classification.confidence})")
+
+                if classification.type == "ignore":
+                    summary.add("ignore", f"Ignored: {url}")
+                    continue
+
+                title = _extract_title(classification)
                 if not dry_run:
-                    result = execute_action(classification, config)
+                    item = make_item(classification.type, title, url, classification.summary)
+                    add_item(items_path, item)
                 else:
-                    result = f"[DRY RUN] Would execute: {classification.type} — {classification.summary}"
-                    log.info(result)
-                summary.add(classification.type, result)
+                    log.info(f"[DRY RUN] Would add: {classification.type} — {title}")
+                summary.add(classification.type, f"{title}: {url}")
 
         except ClassifyAPIError as e:
-            # API failed after retries — abort run, don't advance ROWID
             log.error(f"Claude API exhausted retries at message {msg.rowid}: {e}")
             summary.add_error(f"API failure, aborting: {e}")
             api_failed = True
             break
 
         except Exception as e:
-            # Action execution failures — save as note for manual processing, advance ROWID
             log.error(f"Failed to process message {msg.rowid}: {e}")
             summary.add_error(f"Message {msg.rowid}: {e}")
             if not dry_run:
-                fallback_note = Classification(
-                    type="note", confidence=0.0,
-                    summary=f"[FAILED] {e}",
-                    action_detail={"content": f"Action failed: {e}\n\nOriginal message: {msg.text[:500]}"},
-                )
-                execute_action(fallback_note, config)
+                item = make_item("note", "Processing failed", "", str(e))
+                add_item(items_path, item)
 
-    # Save state: advance to max rowid seen (newest message)
     if not dry_run and not api_failed:
         state.update(max_rowid)
         state.save()
@@ -184,6 +150,19 @@ async def run_pipeline(
         send_notification("hi-sweetheart", notification_text)
 
 
+def _extract_title(classification: Classification) -> str:
+    d = classification.action_detail
+    if classification.type == "bookmark":
+        return d.get("title", classification.summary)
+    if classification.type == "podcast":
+        return d.get("podcast_name", "Podcast")
+    if classification.type == "plugin_install":
+        return d.get("plugin_name", classification.summary)
+    if classification.type == "marketplace_install":
+        return d.get("marketplace_name", classification.summary)
+    return classification.summary
+
+
 def cmd_run(args):
     asyncio.run(run_pipeline(
         config_path=Path(args.config),
@@ -191,29 +170,6 @@ def cmd_run(args):
         mode_override=args.mode,
         dry_run=args.dry_run,
     ))
-
-
-def cmd_pending(args):
-    config = load_config(Path(args.config))
-    pending = load_pending(config)
-    if not pending:
-        print("No pending actions.")
-        return
-    for p in pending:
-        c = p["classification"]
-        print(f"  [{p['id']}] {c['type']} — {c['summary']} (confidence: {c['confidence']})")
-
-
-def cmd_approve(args):
-    config = load_config(Path(args.config))
-    approve_action(args.id, config)
-    print(f"Approved and executed: {args.id}")
-
-
-def cmd_reject(args):
-    config = load_config(Path(args.config))
-    reject_action(args.id, config)
-    print(f"Rejected: {args.id}")
 
 
 def cmd_reset(args):
@@ -247,17 +203,6 @@ def main():
     run_parser.add_argument("--mode", choices=["auto", "tiered", "propose"], help="Override execution mode")
     run_parser.add_argument("--dry-run", action="store_true", help="Run full pipeline with zero side effects (no writes, no state advance, no notifications)")
     run_parser.set_defaults(func=cmd_run)
-
-    pending_parser = subparsers.add_parser("pending", help="List pending actions")
-    pending_parser.set_defaults(func=cmd_pending)
-
-    approve_parser = subparsers.add_parser("approve", help="Approve a pending action")
-    approve_parser.add_argument("id", help="Action ID to approve")
-    approve_parser.set_defaults(func=cmd_approve)
-
-    reject_parser = subparsers.add_parser("reject", help="Reject a pending action")
-    reject_parser.add_argument("id", help="Action ID to reject")
-    reject_parser.set_defaults(func=cmd_reject)
 
     reset_parser = subparsers.add_parser("reset", help="Clear state and start fresh on next run")
     reset_parser.set_defaults(func=cmd_reset)

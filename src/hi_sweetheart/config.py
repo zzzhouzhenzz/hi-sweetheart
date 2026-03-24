@@ -5,25 +5,28 @@ from dataclasses import dataclass
 from pathlib import Path
 
 VALID_MODES = ("auto", "tiered", "propose")
-REQUIRED_FIELDS = ("sender", "mode", "reading_list_path",
-                   "notes_path", "claude_settings_path", "claude_plugins_path",
-                   "log_path", "pending_actions_path")
+REQUIRED_FIELDS = ("sender", "mode", "log_path", "pending_actions_path")
 
 
 class ConfigError(Exception):
     pass
 
 
+DEFAULT_ITEMS_PATH = Path.home() / ".hi-sweetheart" / "items.md"
+
+
 @dataclass
 class Config:
     sender: str
     mode: str
-    reading_list_path: Path
-    notes_path: Path
-    claude_settings_path: Path
-    claude_plugins_path: Path
+    items_path: Path
     log_path: Path
     pending_actions_path: Path
+    # Legacy fields kept for backward compat
+    reading_list_path: Path = Path("/dev/null")
+    notes_path: Path = Path("/dev/null")
+    claude_settings_path: Path = Path("/dev/null")
+    claude_plugins_path: Path = Path("/dev/null")
 
 
 def load_config(path: Path) -> Config:
@@ -42,11 +45,12 @@ def load_config(path: Path) -> Config:
     if data["mode"] not in VALID_MODES:
         raise ConfigError(f"Invalid mode: {data['mode']}. Must be one of {VALID_MODES}")
 
-    path_fields = ("reading_list_path", "notes_path", "claude_settings_path",
-                   "claude_plugins_path", "log_path", "pending_actions_path")
+    items_path = Path(data.get("items_path", str(DEFAULT_ITEMS_PATH))).expanduser()
 
     return Config(
         sender=data["sender"],
         mode=data["mode"],
-        **{f: Path(data[f]).expanduser() for f in path_fields},
+        items_path=items_path,
+        log_path=Path(data["log_path"]).expanduser(),
+        pending_actions_path=Path(data["pending_actions_path"]).expanduser(),
     )
