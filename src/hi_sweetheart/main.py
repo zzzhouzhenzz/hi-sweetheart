@@ -215,6 +215,16 @@ def cmd_reject(args):
     print(f"Rejected: {args.id}")
 
 
+def cmd_reset(args):
+    state_path = Path(args.state).expanduser()
+    if state_path.exists():
+        state_path.unlink()
+        print(f"Deleted {state_path}")
+    else:
+        print("No state file to reset.")
+    print("Next run will start fresh (last 3 days of messages).")
+
+
 def cmd_log(args):
     config = load_config(Path(args.config))
     if not config.log_path.exists():
@@ -247,6 +257,9 @@ def main():
     reject_parser = subparsers.add_parser("reject", help="Reject a pending action")
     reject_parser.add_argument("id", help="Action ID to reject")
     reject_parser.set_defaults(func=cmd_reject)
+
+    reset_parser = subparsers.add_parser("reset", help="Clear state and start fresh on next run")
+    reset_parser.set_defaults(func=cmd_reset)
 
     log_parser = subparsers.add_parser("log", help="Show recent run history")
     log_parser.set_defaults(func=cmd_log)
