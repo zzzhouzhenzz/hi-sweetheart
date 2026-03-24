@@ -45,7 +45,9 @@ For config_update: include "settings" (the JSON settings to merge)
 For bookmark: include "title", "summary"
 For podcast: include "podcast_url", "podcast_name"
 For note: include "content" (the key takeaway)
-For ignore: action_detail can be empty {}"""
+For ignore: action_detail can be empty {}
+
+IMPORTANT: Preserve the original language of the content. If the content is in Chinese, write the summary, title, and action_detail fields in Chinese. Do NOT translate to English."""
 
 
 class ClassifyAPIError(Exception):
