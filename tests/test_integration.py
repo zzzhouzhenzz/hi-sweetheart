@@ -627,10 +627,10 @@ class TestDryRunIntegration:
                 dry_run=True,
             )
 
-        # No reading list created
-        assert not (tmp_path / "reading-list.md").exists()
+        # No reading list created (timestamped files)
+        assert not list(tmp_path.glob("reading-list-*.md"))
         # No notes created
-        assert not (tmp_path / "notes.md").exists()
+        assert not list(tmp_path.glob("notes-*.md"))
         # Notification NOT sent
         mock_notify.assert_not_called()
 
@@ -707,7 +707,7 @@ class TestDryRunIntegration:
             )
 
         # No note file created despite fetch failure
-        assert not (tmp_path / "notes.md").exists()
+        assert not list(tmp_path.glob("notes-*.md"))
         # State not advanced
         state = json.loads(state_path.read_text())
         assert state["last_message_rowid"] == 0
@@ -763,8 +763,8 @@ class TestDryRunIntegration:
                 dry_run=False,
             )
 
-        # Files WERE written
-        assert (tmp_path / "reading-list.md").exists()
+        # Files WERE written (timestamped)
+        assert list(tmp_path.glob("reading-list-*.md"))
         # State WAS advanced
         state = json.loads(state_path.read_text())
         assert state["last_message_rowid"] == 2

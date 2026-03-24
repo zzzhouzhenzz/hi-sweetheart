@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from hi_sweetheart.actions import (
@@ -35,6 +36,12 @@ async def run_pipeline(
     config = load_config(config_path)
     if mode_override:
         config.mode = mode_override
+
+    # Each run gets its own output file with timestamp suffix
+    run_ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    for attr in ("reading_list_path", "notes_path"):
+        p = getattr(config, attr)
+        setattr(config, attr, p.with_stem(f"{p.stem}-{run_ts}"))
 
     log = setup_logging(config.log_path)
     if dry_run:

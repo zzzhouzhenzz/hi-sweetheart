@@ -9,6 +9,13 @@ from hi_sweetheart.classifier import ClassifyAPIError
 from hi_sweetheart.reader import _datetime_to_imessage_ns
 
 
+def _find_run_file(tmp_path: Path, prefix: str) -> Path:
+    """Find the timestamped output file (e.g. reading-list-20260324-011300.md)."""
+    matches = sorted(tmp_path.glob(f"{prefix}-*.md"))
+    assert matches, f"No {prefix}-*.md file found in {tmp_path}"
+    return matches[-1]
+
+
 def _setup_environment(tmp_path) -> dict:
     """Create config, state dir, and mock iMessage DB."""
     config_path = tmp_path / "config.json"
@@ -74,7 +81,7 @@ async def test_run_pipeline_processes_messages(tmp_path):
             db_path=env["db_path"],
         )
 
-    reading_list = (tmp_path / "reading-list.md").read_text()
+    reading_list = _find_run_file(tmp_path, "reading-list").read_text()
     assert "Prompting" in reading_list
 
     state = json.loads(env["state_path"].read_text())
@@ -140,7 +147,7 @@ async def test_run_pipeline_fetch_failure_creates_note(tmp_path):
             db_path=env["db_path"],
         )
 
-    notes = (tmp_path / "notes.md").read_text()
+    notes = _find_run_file(tmp_path, "notes").read_text()
     assert "example.com" in notes
 
     state = json.loads(env["state_path"].read_text())
@@ -191,7 +198,7 @@ async def test_full_pipeline_tiered_mode(tmp_path):
             db_path=env["db_path"],
         )
 
-    assert (tmp_path / "reading-list.md").exists()
+    assert _find_run_file(tmp_path, "reading-list")
 
     pending = json.loads((tmp_path / "pending.json").read_text())
     assert len(pending) == 1
