@@ -179,6 +179,12 @@ def cmd_reset(args):
         print(f"Deleted {state_path}")
     else:
         print("No state file to reset.")
+
+    config = load_config(Path(args.config))
+    if config.items_path.exists():
+        config.items_path.write_text("# Hi Sweetheart\n\n", encoding="utf-8")
+        print(f"Cleared {config.items_path}")
+
     print("Next run will start fresh (last 3 days of messages).")
 
 
