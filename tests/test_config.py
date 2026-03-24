@@ -4,23 +4,33 @@ from pathlib import Path
 from hi_sweetheart.config import load_config, ConfigError
 
 
-def test_load_config_from_file(tmp_path):
-    cfg_file = tmp_path / "config.json"
-    cfg_file.write_text(json.dumps({
+def _minimal_config():
+    return {
         "sender": "+15551234567",
         "mode": "auto",
-        "reading_list_path": "~/Downloads/reading-list.md",
-        "notes_path": "~/.hi-sweetheart/notes.md",
-        "claude_settings_path": "~/.claude/settings.json",
-        "claude_plugins_path": "~/.claude/plugins",
         "log_path": "~/.hi-sweetheart/runs.log",
         "pending_actions_path": "~/.hi-sweetheart/pending.json",
-    }))
+    }
+
+
+def test_load_config_from_file(tmp_path):
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(json.dumps(_minimal_config()))
     config = load_config(cfg_file)
     assert config.sender == "+15551234567"
     assert config.mode == "auto"
-    assert "~" not in str(config.reading_list_path)
-    assert isinstance(config.reading_list_path, Path)
+    assert str(config.items_path).endswith(".hi-sweetheart/items.md")
+    assert isinstance(config.items_path, Path)
+
+
+def test_load_config_custom_items_path(tmp_path):
+    data = _minimal_config()
+    data["items_path"] = "~/custom/items.md"
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(json.dumps(data))
+    config = load_config(cfg_file)
+    assert str(config.items_path).endswith("custom/items.md")
+    assert "~" not in str(config.items_path)
 
 
 def test_load_config_missing_file(tmp_path):
@@ -29,17 +39,10 @@ def test_load_config_missing_file(tmp_path):
 
 
 def test_load_config_invalid_mode(tmp_path):
+    data = _minimal_config()
+    data["mode"] = "yolo"
     cfg_file = tmp_path / "config.json"
-    cfg_file.write_text(json.dumps({
-        "sender": "+15551234567",
-        "mode": "yolo",
-        "reading_list_path": "~/r.md",
-        "notes_path": "~/n.md",
-        "claude_settings_path": "~/.claude/settings.json",
-        "claude_plugins_path": "~/.claude/plugins",
-        "log_path": "~/log",
-        "pending_actions_path": "~/pending.json",
-    }))
+    cfg_file.write_text(json.dumps(data))
     with pytest.raises(ConfigError, match="mode"):
         load_config(cfg_file)
 

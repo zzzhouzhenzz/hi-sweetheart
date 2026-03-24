@@ -39,12 +39,13 @@ def _make_config(tmp_path) -> Config:
     return Config(
         sender="+15551234567",
         mode="auto",
+        items_path=tmp_path / "items.md",
+        log_path=tmp_path / "runs.log",
+        pending_actions_path=tmp_path / "pending.json",
         reading_list_path=tmp_path / "reading-list.md",
         notes_path=tmp_path / "notes.md",
         claude_settings_path=tmp_path / "settings.json",
         claude_plugins_path=tmp_path / "plugins",
-        log_path=tmp_path / "runs.log",
-        pending_actions_path=tmp_path / "pending.json",
     )
 
 
@@ -89,10 +90,6 @@ class TestStateConfigIntegration:
         config_data = {
             "sender": "+15551234567",
             "mode": "auto",
-            "reading_list_path": str(tmp_path / "rl.md"),
-            "notes_path": str(tmp_path / "notes.md"),
-            "claude_settings_path": str(tmp_path / "settings.json"),
-            "claude_plugins_path": str(tmp_path / "plugins"),
             "log_path": str(tmp_path / "runs.log"),
             "pending_actions_path": str(tmp_path / "pending.json"),
         }
@@ -582,10 +579,7 @@ def _setup_pipeline_env(tmp_path, sender="+15551234567"):
     config_path.write_text(json.dumps({
         "sender": sender,
         "mode": "auto",
-        "reading_list_path": str(tmp_path / "reading-list.md"),
-        "notes_path": str(tmp_path / "notes.md"),
-        "claude_settings_path": str(tmp_path / "settings.json"),
-        "claude_plugins_path": str(tmp_path / "plugins"),
+        "items_path": str(tmp_path / "items.md"),
         "log_path": str(tmp_path / "runs.log"),
         "pending_actions_path": str(tmp_path / "pending.json"),
     }))
@@ -627,10 +621,8 @@ class TestDryRunIntegration:
                 dry_run=True,
             )
 
-        # No reading list created (timestamped files)
-        assert not list(tmp_path.glob("reading-list-*.md"))
-        # No notes created
-        assert not list(tmp_path.glob("notes-*.md"))
+        # No items file created
+        assert not (tmp_path / "items.md").exists()
         # Notification NOT sent
         mock_notify.assert_not_called()
 
@@ -706,8 +698,8 @@ class TestDryRunIntegration:
                 dry_run=True,
             )
 
-        # No note file created despite fetch failure
-        assert not list(tmp_path.glob("notes-*.md"))
+        # No items file created despite fetch failure
+        assert not (tmp_path / "items.md").exists()
         # State not advanced
         state = json.loads(state_path.read_text())
         assert state["last_message_rowid"] == 0
@@ -763,8 +755,11 @@ class TestDryRunIntegration:
                 dry_run=False,
             )
 
-        # Files WERE written (timestamped)
-        assert list(tmp_path.glob("reading-list-*.md"))
+        # Items file was written
+        assert (tmp_path / "items.md").exists()
+        from hi_sweetheart.items import read_items
+        items = read_items(tmp_path / "items.md")
+        assert len(items) == 2
         # State WAS advanced
         state = json.loads(state_path.read_text())
         assert state["last_message_rowid"] == 2

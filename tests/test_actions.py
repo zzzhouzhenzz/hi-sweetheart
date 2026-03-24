@@ -23,12 +23,13 @@ def _make_config(tmp_path) -> Config:
     return Config(
         sender="+15551234567",
         mode="auto",
+        items_path=tmp_path / "items.md",
+        log_path=tmp_path / "runs.log",
+        pending_actions_path=tmp_path / "pending.json",
         reading_list_path=tmp_path / "reading-list.md",
         notes_path=tmp_path / "notes.md",
         claude_settings_path=tmp_path / "settings.json",
         claude_plugins_path=tmp_path / "plugins",
-        log_path=tmp_path / "runs.log",
-        pending_actions_path=tmp_path / "pending.json",
     )
 
 
