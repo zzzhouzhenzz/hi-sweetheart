@@ -265,14 +265,16 @@ class TestClassifierParseIntegration:
 
     @patch("hi_sweetheart.classifier.subprocess.run")
     def test_classify_batch_calls_claude_and_parses(self, mock_run):
+        text = json.dumps({
+            "type": "bookmark",
+            "confidence": 0.85,
+            "summary": "A cool tool",
+            "action_detail": {"title": "Tool", "summary": "Does stuff"},
+        })
+        stream_event = json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}})
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout=json.dumps({
-                "type": "bookmark",
-                "confidence": 0.85,
-                "summary": "A cool tool",
-                "action_detail": {"title": "Tool", "summary": "Does stuff"},
-            }),
+            stdout=stream_event,
         )
         import asyncio
         results = asyncio.run(classify_batch([
@@ -469,15 +471,17 @@ class TestReaderClassifierActionsIntegration:
         urls = extract_urls(msgs[0].text)
         assert urls == ["https://example.com/cool-article"]
 
-        # Step 3: classify via batch (mock claude -p)
+        # Step 3: classify via batch (mock claude -p stream-json output)
+        text = json.dumps({
+            "type": "bookmark",
+            "confidence": 0.9,
+            "summary": "Cool article about AI",
+            "action_detail": {"title": "Cool Article", "summary": "AI trends 2026"},
+        })
+        stream_event = json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}})
         mock_claude.return_value = MagicMock(
             returncode=0,
-            stdout=json.dumps({
-                "type": "bookmark",
-                "confidence": 0.9,
-                "summary": "Cool article about AI",
-                "action_detail": {"title": "Cool Article", "summary": "AI trends 2026"},
-            }),
+            stdout=stream_event,
         )
         import asyncio
         results = asyncio.run(classify_batch([
@@ -501,14 +505,16 @@ class TestReaderClassifierActionsIntegration:
         msgs = read_messages(db_path, sender=sender, after_rowid=0)
         urls = extract_urls(msgs[0].text)
 
+        text = json.dumps({
+            "type": "plugin_install",
+            "confidence": 0.3,
+            "summary": "Maybe a plugin",
+            "action_detail": {"repo_url": urls[0]},
+        })
+        stream_event = json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}})
         mock_claude.return_value = MagicMock(
             returncode=0,
-            stdout=json.dumps({
-                "type": "plugin_install",
-                "confidence": 0.3,
-                "summary": "Maybe a plugin",
-                "action_detail": {"repo_url": urls[0]},
-            }),
+            stdout=stream_event,
         )
 
         import asyncio

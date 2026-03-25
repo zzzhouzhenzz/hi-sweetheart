@@ -22,11 +22,17 @@ def _make_input(url="https://example.com", msg="check this", content="some conte
     return ClassifyInput(url=url, message_text=msg, fetched_content=content)
 
 
+def _wrap_stream_json(text: str) -> str:
+    """Wrap raw text in a stream-json assistant event, matching claude -p output."""
+    event = {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
+    return json.dumps(event)
+
+
 @pytest.mark.asyncio
 async def test_classify_batch_single_item():
     mock_result = MagicMock()
     mock_result.returncode = 0
-    mock_result.stdout = json.dumps({
+    mock_result.stdout = _wrap_stream_json(json.dumps({
         "type": "bookmark",
         "confidence": 0.9,
         "summary": "Article about prompt engineering",
@@ -34,7 +40,7 @@ async def test_classify_batch_single_item():
             "title": "Prompt Engineering Guide",
             "summary": "Comprehensive guide to prompting",
         },
-    })
+    }))
 
     with patch("hi_sweetheart.classifier.subprocess.run", return_value=mock_result):
         results = await classify_batch([_make_input(url="https://example.com/prompting")])
@@ -47,11 +53,11 @@ async def test_classify_batch_single_item():
 async def test_classify_batch_multiple_items():
     mock_result = MagicMock()
     mock_result.returncode = 0
-    mock_result.stdout = json.dumps([
+    mock_result.stdout = _wrap_stream_json(json.dumps([
         {"index": 0, "type": "bookmark", "confidence": 0.9, "summary": "Article", "action_detail": {"title": "A", "summary": "B"}},
         {"index": 1, "type": "note", "confidence": 0.8, "summary": "A tip", "action_detail": {"content": "Use X"}},
         {"index": 2, "type": "ignore", "confidence": 0.95, "summary": "Irrelevant", "action_detail": {}},
-    ])
+    ]))
 
     inputs = [
         _make_input(url="https://a.com"),
@@ -70,12 +76,12 @@ async def test_classify_batch_multiple_items():
 async def test_classify_batch_low_confidence_becomes_note():
     mock_result = MagicMock()
     mock_result.returncode = 0
-    mock_result.stdout = json.dumps({
+    mock_result.stdout = _wrap_stream_json(json.dumps({
         "type": "plugin_install",
         "confidence": 0.3,
         "summary": "Maybe a plugin?",
         "action_detail": {},
-    })
+    }))
 
     with patch("hi_sweetheart.classifier.subprocess.run", return_value=mock_result):
         results = await classify_batch([_make_input()])
@@ -86,7 +92,7 @@ async def test_classify_batch_low_confidence_becomes_note():
 async def test_classify_batch_invalid_json_returns_note():
     mock_result = MagicMock()
     mock_result.returncode = 0
-    mock_result.stdout = "not valid json {{{"
+    mock_result.stdout = _wrap_stream_json("not valid json {{{")
 
     with patch("hi_sweetheart.classifier.subprocess.run", return_value=mock_result):
         results = await classify_batch([_make_input()])

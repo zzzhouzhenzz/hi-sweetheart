@@ -98,6 +98,28 @@ async def classify_batch(inputs: list[ClassifyInput]) -> list[Classification]:
     return results
 
 
+def _extract_text_from_stream(stdout: str) -> str:
+    """Extract assistant text from claude -p --output-format stream-json output.
+
+    Workaround for claude-code 2.1.83 bug where --output-format text returns
+    empty results despite the model producing output.
+    """
+    text_parts = []
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") == "assistant":
+            for block in event.get("message", {}).get("content", []):
+                if block.get("type") == "text":
+                    text_parts.append(block["text"])
+    return "".join(text_parts)
+
+
 async def _classify_batch_cli(batch: list[ClassifyInput]) -> list[Classification]:
     """Send a batch of inputs to claude -p and parse array response."""
     # Build prompt with indexed items
@@ -119,7 +141,8 @@ async def _classify_batch_cli(batch: list[ClassifyInput]) -> list[Classification
                 [
                     "claude", "-p",
                     "--model", "sonnet",
-                    "--output-format", "text",
+                    "--output-format", "stream-json",
+                    "--verbose",
                     "--system-prompt", system_prompt,
                     "--dangerously-skip-permissions",
                 ],
@@ -132,7 +155,9 @@ async def _classify_batch_cli(batch: list[ClassifyInput]) -> list[Classification
             if result.returncode != 0:
                 raise RuntimeError(f"claude -p exited {result.returncode}: {result.stderr.strip()}")
 
-            raw = result.stdout.strip()
+            raw = _extract_text_from_stream(result.stdout)
+            if not raw:
+                raise RuntimeError("claude -p returned empty response")
 
             if len(batch) == 1:
                 return [_parse_response(raw, batch[0].url)]
